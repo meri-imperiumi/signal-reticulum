@@ -5,6 +5,7 @@ This plugin connects the [Signal K](https://signalk.org/) marine platform with t
 ## Features
 
 - **Reticulum connectivity** — brings up a Reticulum node with the configured interfaces (TCP, AutoInterface peering, …), defaulting to zero-config `AutoInterface` peering when none are configured.
+- **Shared instance support** — by default, reuse a locally running `rnsd` and its mesh interfaces; falls back to opening the configured interfaces when no shared instance is reachable.
 - **Persistent identity** — generates and stores a Reticulum identity on first start, or reuses one you provide.
 - **LXMF messaging** — registers the standard `lxmf.delivery` destination and announces the node to the mesh.
 - **Crew alerts** — when Signal K raises a notification at the `alarm` or `emergency` level, an LXMF message is sent to each configured crew member.
@@ -15,9 +16,15 @@ This plugin connects the [Signal K](https://signalk.org/) marine platform with t
 
 On first start a new Reticulum identity is generated and stored in the plugin configuration. To reuse an existing Reticulum identity instead, paste its private key (128 bytes / 256 hex characters) into the **Identity** group.
 
+### Shared Reticulum instance
+
+By default the plugin connects to a locally running shared Reticulum instance (a Python `rnsd` or another daemon) over its loopback socket and reuses its mesh interfaces, rather than opening its own. The endpoint is auto-discovered from the Reticulum config (`~/.reticulum/config`). When no shared instance is reachable, the plugin transparently falls back to opening the interfaces configured below.
+
+Untick **Use shared Reticulum instance** to always open your own interfaces.
+
 ### Interfaces
 
-Any number of Reticulum interfaces of any available type may be configured. When none are configured, an `AutoInterface` (zero-config LAN/Wi-Fi peering) is started by default.
+Any number of Reticulum interfaces of any available type may be configured. When none are configured (and no shared instance is used), an `AutoInterface` (zero-config LAN/Wi-Fi peering) is started by default.
 
 ### Crew members
 

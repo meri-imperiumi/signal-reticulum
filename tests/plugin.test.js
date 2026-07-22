@@ -38,7 +38,23 @@ class FakeRns {
   removeInterface(iface) {
     this.removed.push(iface);
   }
+  // Shared-instance support. Returns null by default (nothing reachable) so
+  // the plugin falls back to configured interfaces; tests flip
+  // FakeRns.sharedAvailable to simulate a running rnsd.
+  async connectToSharedInstance(options) {
+    this.sharedInstanceOptions = options;
+    if (!FakeRns.sharedAvailable) {
+      return null;
+    }
+    this.shared = {
+      name: "shared-instance",
+      async disconnect() {},
+    };
+    this.addInterface(this.shared, true);
+    return this.shared;
+  }
 }
+FakeRns.sharedAvailable = false;
 
 // Install fakes on the plugin's dependency seam.
 makePlugin.deps.Reticulum = FakeRns;
@@ -174,6 +190,7 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
   const schema = plugin.schema();
 
   assert.deepEqual(Object.keys(schema.properties), [
+    "use_shared_instance",
     "interfaces",
     "identity",
     "messaging",
@@ -451,4 +468,54 @@ test("stop tears down messaging and the notification subscription", async () => 
 
   assert.equal(plugin.lxmf, undefined);
   assert.equal(app.subscriptionmanager.unsubscribed, true);
+});
+
+test("start uses a shared Reticulum instance when one is available", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeRns.sharedAvailable = true;
+
+  try {
+    await plugin.start({});
+
+    assert.equal(plugin.interfaces.length, 1);
+    assert.equal(plugin.interfaces[0].name, "shared-instance");
+    // The shared interface is attached by connectToSharedInstance itself.
+    assert.equal(plugin.rns.added.length, 1);
+    assert.match(app.statusCalls[0], /connected to shared Reticulum instance/);
+  } finally {
+    FakeRns.sharedAvailable = false;
+  }
+});
+
+test("start falls back to configured interfaces when no shared instance is reachable", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeRns.sharedAvailable = false;
+
+  await plugin.start({});
+
+  assert.equal(plugin.interfaces.length, 1);
+  assert.equal(plugin.interfaces[0].type, "auto");
+  assert.match(app.statusCalls[0], /1 interface\(s\) connected/);
+});
+
+test("start does not attempt the shared instance when use_shared_instance is false", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeRns.sharedAvailable = true;
+
+  try {
+    await plugin.start({ use_shared_instance: false });
+
+    assert.equal(
+      plugin.rns.sharedInstanceOptions,
+      undefined,
+      "shared instance not attempted",
+    );
+    assert.equal(plugin.interfaces[0].type, "auto");
+    assert.match(app.statusCalls[0], /1 interface\(s\) connected/);
+  } finally {
+    FakeRns.sharedAvailable = false;
+  }
 });

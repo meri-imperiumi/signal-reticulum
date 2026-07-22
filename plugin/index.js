@@ -9,6 +9,7 @@ const { toHex } = RNS;
 const { buildPluginSchema } = require("./schema");
 const { resolveIdentity } = require("./identity");
 const {
+  connectSharedInstance,
   effectiveInterfaces,
   setupInterfaces,
   teardownInterfaces,
@@ -98,18 +99,41 @@ module.exports = (app) => {
         plugin.rns = rns;
         app.debug(`Loaded Reticulum identity ${hashHex}`);
 
-        const list = effectiveInterfaces(config && config.interfaces);
-        const defaulted = list.every((entry) => entry && entry.type === "auto");
-        if (defaulted) {
-          app.debug("No interfaces configured; starting default AutoInterface");
-        }
-        const result = await setupInterfaces(
-          rns,
-          list,
-          deps.getInterface,
-          app.debug,
+        // Optionally reuse a locally running shared Reticulum instance (rnsd)
+        // and its mesh interfaces. Enabled by default: when no shared instance
+        // is reachable we transparently fall back to the configured interfaces.
+        const useSharedInstance = !(
+          config && config.use_shared_instance === false
         );
-        plugin.interfaces = result.connected;
+        let usedSharedInstance = false;
+        if (useSharedInstance) {
+          const shared = await connectSharedInstance(rns, {}, app.debug);
+          if (shared) {
+            plugin.interfaces = [shared];
+            usedSharedInstance = true;
+          }
+        }
+
+        let setupErrors = [];
+        if (!usedSharedInstance) {
+          const list = effectiveInterfaces(config && config.interfaces);
+          const defaulted = list.every(
+            (entry) => entry && entry.type === "auto",
+          );
+          if (defaulted) {
+            app.debug(
+              "No interfaces configured; starting default AutoInterface",
+            );
+          }
+          const result = await setupInterfaces(
+            rns,
+            list,
+            deps.getInterface,
+            app.debug,
+          );
+          plugin.interfaces = result.connected;
+          setupErrors = result.errors;
+        }
 
         // Bring up LXMF messaging so alerts can be sent to the crew. A failure
         // here is non-fatal: the node stays up for connectivity, just without
@@ -174,13 +198,14 @@ module.exports = (app) => {
           }
         }
 
-        const summary =
-          `Identity ${hashHex}, ` +
-          `${result.connected.length} interface(s) connected`;
-        if (result.errors.length) {
+        const connectivity = usedSharedInstance
+          ? "connected to shared Reticulum instance"
+          : `${plugin.interfaces.length} interface(s) connected`;
+        const summary = `Identity ${hashHex}, ${connectivity}`;
+        if (setupErrors.length) {
           app.setPluginError(
-            `${summary}; ${result.errors.length} failed: ` +
-              result.errors.map((e) => e.error).join("; "),
+            `${summary}; ${setupErrors.length} failed: ` +
+              setupErrors.map((e) => e.error).join("; "),
           );
         } else {
           app.setPluginStatus(summary);

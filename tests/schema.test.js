@@ -38,6 +38,7 @@ test("buildPluginSchema returns a draft-07 object schema with the interfaces gro
   assert.equal(schema.type, "object");
   assert.equal(schema.title, "Signal K Reticulum");
   assert.deepEqual(Object.keys(schema.properties), [
+    "use_shared_instance",
     "interfaces",
     "identity",
     "messaging",

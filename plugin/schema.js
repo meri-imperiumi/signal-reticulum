@@ -83,6 +83,17 @@ function buildPluginSchema(interfaces) {
     type: "object",
     title: "Signal K Reticulum",
     properties: {
+      use_shared_instance: {
+        type: "boolean",
+        title: "Use shared Reticulum instance",
+        description:
+          "Connect to a locally running shared Reticulum instance (rnsd) and " +
+          "reuse its mesh interfaces, instead of opening the interfaces " +
+          "configured below. The endpoint is auto-discovered from the " +
+          "Reticulum config. When no shared instance is reachable, the plugin " +
+          "falls back to the configured interfaces.",
+        default: true,
+      },
       interfaces: {
         type: "array",
         title: "Reticulum interfaces",
