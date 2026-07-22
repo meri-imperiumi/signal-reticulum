@@ -66,8 +66,9 @@ makePlugin.deps.getInterface = (id) => {
 
 // --- Fakes so the plugin's LXMF messaging can be exercised without RNS I/O ---
 
-class FakeLxmRouter {
+class FakeLxmRouter extends EventTarget {
   constructor(identity, rns) {
+    super();
     this.identity = identity;
     this.rns = rns;
     this.initCalls = 0;
@@ -456,6 +457,46 @@ test("alerts are not forwarded when send_alerts is disabled", async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
 
   assert.equal(plugin.lxmf.sent.length, 0);
+});
+
+test('an incoming "ping" LXMF message is answered with "Pong"', async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  await plugin.start({ messaging: {} });
+  const router = plugin.lxmf;
+  assert.equal(router.sent.length, 0);
+
+  const source = new Uint8Array(16).fill(4);
+  router.dispatchEvent(
+    new CustomEvent("message", {
+      detail: { message: { sourceHash: source, content: "ping" } },
+    }),
+  );
+  // The reply is async; let it flush.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(router.sent.length, 1, 'a "Pong" reply was sent');
+  const reply = router.sent[0].message.options;
+  assert.equal(reply.content, "Pong");
+  assert.deepEqual(reply.destinationHash, Buffer.from(source));
+});
+
+test("an unmatched LXMF message does not trigger a reply", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  await plugin.start({ messaging: {} });
+  const router = plugin.lxmf;
+
+  router.dispatchEvent(
+    new CustomEvent("message", {
+      detail: {
+        message: { sourceHash: new Uint8Array(16).fill(4), content: "hello" },
+      },
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(router.sent.length, 0);
 });
 
 test("stop tears down messaging and the notification subscription", async () => {

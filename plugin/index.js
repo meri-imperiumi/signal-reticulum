@@ -16,6 +16,7 @@ const {
 } = require("./interfaces");
 const { sendNotification } = require("./notifications");
 const { setupMessaging, makeDeliverer } = require("./messaging");
+const commands = require("./commands");
 
 /**
  * Overridable dependencies (the Reticulum orchestrator class and the interface
@@ -150,6 +151,31 @@ module.exports = (app) => {
             app.debug,
           );
           deliver = makeDeliverer(plugin.lxmf, plugin.identity);
+
+          // Handle incoming LXMF messages (ping/pong, and future commands)
+          // from any peer on the mesh.
+          const onLxmfMessage = async (event) => {
+            const message = event && event.detail && event.detail.message;
+            if (!message) {
+              return;
+            }
+            app.debug(
+              `Received LXMF message from ${toHex(message.sourceHash || [])}`,
+            );
+            try {
+              await commands.handleMessage(message, config, deliver, app);
+            } catch (e) {
+              app.debug(`LXMF message handling error: ${e.message}`);
+            }
+          };
+          plugin.lxmf.addEventListener("message", onLxmfMessage);
+          unsubscribes.push(() => {
+            try {
+              plugin.lxmf.removeEventListener("message", onLxmfMessage);
+            } catch {
+              /* best effort */
+            }
+          });
         } catch (e) {
           app.debug(`Messaging setup error: ${e.message}`);
         }

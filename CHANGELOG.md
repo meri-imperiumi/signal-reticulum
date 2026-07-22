@@ -5,4 +5,5 @@
 - Optional shared Reticulum instance support: reuse a locally running `rnsd` and its mesh interfaces, enabled by default with automatic fallback to the configured interfaces
 - Basic LXMF messaging: registers the `lxmf.delivery` destination and announces the node to the mesh
 - Forward Signal K `alarm`/`emergency` notifications to crew members as LXMF messages, with episode-based debouncing to avoid spamming on flapping alerts
+- Receive LXMF messages and handle text commands, starting with a `ping`/`pong` responder available to any peer
 - Initial release

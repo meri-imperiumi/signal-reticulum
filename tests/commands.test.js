@@ -1,0 +1,122 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const { commands, isFromCrew, handleMessage } = require("../plugin/commands");
+const ping = require("../plugin/commands/ping");
+
+const SOURCE = new Uint8Array(16).fill(5);
+const SOURCE_HEX = Buffer.from(SOURCE).toString("hex");
+
+/** A minimal message shape for the command tests. */
+function makeMessage(content, sourceHash = SOURCE) {
+  return { content, sourceHash };
+}
+
+/** A recording deliver callback: `deliver(destHash, title, content)`. */
+function makeDeliver() {
+  const calls = [];
+  const deliver = async (destHash, title, content) => {
+    calls.push({ destHash, title, content });
+  };
+  return { deliver, calls };
+}
+
+test("the ping command is registered", () => {
+  assert.equal(commands.ping, ping);
+});
+
+test("ping is available to everyone (not crew-only)", () => {
+  assert.equal(ping.crewOnly, false);
+});
+
+test("ping accepts a lowercase 'ping' content", () => {
+  assert.equal(ping.accept(makeMessage("ping")), true);
+});
+
+test("ping accepts 'Ping' with surrounding whitespace", () => {
+  assert.equal(ping.accept(makeMessage("  Ping ")), true);
+});
+
+test("ping does not accept other content", () => {
+  assert.equal(ping.accept(makeMessage("hello")), false);
+  assert.equal(ping.accept(makeMessage("")), false);
+  assert.equal(ping.accept({ content: undefined }), false);
+  assert.equal(ping.accept(null), false);
+});
+
+test("ping replies 'Pong' to the sender's source hash", async () => {
+  const { deliver, calls } = makeDeliver();
+  await ping.handle(makeMessage("ping"), {}, deliver);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].destHash, SOURCE_HEX);
+  assert.equal(calls[0].content, "Pong");
+});
+
+test("isFromCrew returns true when the source matches a crew destination", () => {
+  const settings = { crew: [{ name: "Alice", destination: SOURCE_HEX }] };
+  assert.equal(isFromCrew(makeMessage("ping"), settings), true);
+});
+
+test("isFromCrew is case-insensitive with the configured destination", () => {
+  const settings = {
+    crew: [{ name: "Alice", destination: SOURCE_HEX.toUpperCase() }],
+  };
+  assert.equal(isFromCrew(makeMessage("ping"), settings), true);
+});
+
+test("isFromCrew returns false for unknown senders", () => {
+  const other = new Uint8Array(16).fill(1);
+  const settings = { crew: [{ name: "Alice", destination: SOURCE_HEX }] };
+  assert.equal(isFromCrew(makeMessage("ping", other), settings), false);
+});
+
+test("isFromCrew returns false when no crew is configured", () => {
+  assert.equal(isFromCrew(makeMessage("ping"), {}), false);
+  assert.equal(isFromCrew(makeMessage("ping"), undefined), false);
+  assert.equal(isFromCrew(null, { crew: [] }), false);
+});
+
+test("handleMessage dispatches a matching ping and replies", async () => {
+  const { deliver, calls } = makeDeliver();
+  const debugs = [];
+  const app = { debug: (...a) => debugs.push(a.join(" ")) };
+
+  await handleMessage(makeMessage("PING"), {}, deliver, app);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].destHash, SOURCE_HEX);
+  assert.equal(calls[0].content, "Pong");
+  assert.ok(debugs.some((m) => /handled by command "ping"/.test(m)));
+});
+
+test("handleMessage does not reply to unmatched messages", async () => {
+  const { deliver, calls } = makeDeliver();
+  await handleMessage(makeMessage("unknown"), {}, deliver, {});
+  assert.equal(calls.length, 0);
+});
+
+test("handleMessage does nothing without a deliver callback", async () => {
+  const { calls } = makeDeliver();
+  await handleMessage(makeMessage("ping"), {}, undefined, {});
+  assert.equal(calls.length, 0);
+});
+
+test("handleMessage swallows errors thrown by a command", async () => {
+  const { deliver } = makeDeliver();
+  // Temporarily replace ping with a failing implementation.
+  const original = commands.ping;
+  commands.ping = {
+    crewOnly: false,
+    accept: () => true,
+    handle: () => {
+      throw new Error("boom");
+    },
+  };
+  const errors = [];
+  const app = { error: (...a) => errors.push(a.join(" ")) };
+
+  await handleMessage(makeMessage("ping"), {}, deliver, app);
+
+  assert.ok(errors.some((m) => /failed: boom/.test(m)));
+  commands.ping = original;
+});

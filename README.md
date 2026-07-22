@@ -9,6 +9,7 @@ This plugin connects the [Signal K](https://signalk.org/) marine platform with t
 - **Persistent identity** — generates and stores a Reticulum identity on first start, or reuses one you provide.
 - **LXMF messaging** — registers the standard `lxmf.delivery` destination and announces the node to the mesh.
 - **Crew alerts** — when Signal K raises a notification at the `alarm` or `emergency` level, an LXMF message is sent to each configured crew member.
+- **Incoming commands** — the node receives LXMF messages and answers text commands from any peer, starting with `ping` (replies `pong`).
 
 ## Configuration
 
@@ -42,6 +43,18 @@ The plugin subscribes to `notifications.*` on `vessels.self`. When a notificatio
 A flapping alert (e.g. a bilge sensor switching rapidly on and off) is only forwarded once per active episode. Once the notification clears, it is held for a debounce period before a new occurrence of the same alert will be forwarded again.
 
 Delivery is **opportunistic** by default: each message is sent as a single encrypted Reticulum packet addressed to the recipient's `lxmf.delivery` destination. This requires the recipient's identity to be known to the node (learned from the recipient announcing). Store-and-forward delivery via a propagation node is planned.
+
+## Incoming messages
+
+The node listens for incoming LXMF messages on its `lxmf.delivery` destination and dispatches them to text commands. Commands are matched against the message content (first match wins); a command may be restricted to messages coming from configured crew members.
+
+Available commands:
+
+| Command | Crew only | Description |
+| --- | --- | --- |
+| `ping` | no | Replies `pong`, so any peer can check the node is reachable. |
+
+Replies are sent back to the sender's `lxmf.delivery` destination (the message source hash).
 
 ## Status
 
