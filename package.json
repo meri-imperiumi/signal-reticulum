@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "npx @biomejs/biome check --use-editorconfig=true plugin/",
     "format": "npx @biomejs/biome check --use-editorconfig=true --write plugin/ tests/",
-    "test": "node --test --test-force-exit \"tests/**/*.test.js\""
+    "test": "node --test --test-force-exit \"tests/*.test.js\""
   },
   "repository": {
     "type": "git",
