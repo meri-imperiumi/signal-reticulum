@@ -123,8 +123,60 @@ function buildPluginSchema(interfaces) {
         },
         additionalProperties: false,
       },
-      // Other configuration groups (e.g. announce destinations) will be added
-      // here as siblings of `interfaces` and `identity`.
+      messaging: {
+        type: "object",
+        title: "Messaging",
+        description:
+          "LXMF messaging options. When alert forwarding is enabled, Signal K " +
+          "notifications at the alarm/emergency levels are sent to every " +
+          "configured crew member as an LXMF message.",
+        properties: {
+          send_alerts: {
+            type: "boolean",
+            title: "Send Signal K alerts to the crew via LXMF",
+            default: true,
+          },
+          display_name: {
+            type: "string",
+            title: "LXMF display name",
+            description:
+              "Name announced to the mesh for this node's lxmf.delivery " +
+              "destination, shown on crew members' messaging devices.",
+            default: "Signal K",
+          },
+        },
+        additionalProperties: false,
+      },
+      crew: {
+        type: "array",
+        title: "Crew members",
+        description:
+          "LXMF destinations to alert. Each entry is a crew member's " +
+          "lxmf.delivery destination hash (32 hexadecimal characters).",
+        default: [],
+        items: {
+          type: "object",
+          required: ["name", "destination"],
+          properties: {
+            name: {
+              type: "string",
+              title: "Name",
+              description: "A label for this crew member (used in logs).",
+            },
+            destination: {
+              type: "string",
+              title: "LXMF destination hash",
+              description:
+                "The 32-character hexadecimal lxmf.delivery destination " +
+                "hash of the crew member's device.",
+              pattern: "^[0-9a-fA-F]{32}$",
+              minLength: 32,
+              maxLength: 32,
+            },
+          },
+          additionalProperties: false,
+        },
+      },
     },
   };
 }

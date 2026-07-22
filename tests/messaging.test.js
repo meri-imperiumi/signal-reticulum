@@ -1,0 +1,122 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const { deps, setupMessaging, makeDeliverer } = require("../plugin/messaging");
+
+/** A fake LXMRouter that records init/announce/send calls. */
+class FakeLxmRouter {
+  constructor(identity, rns) {
+    this.identity = identity;
+    this.rns = rns;
+    this.initCalls = 0;
+    this.announceCalls = [];
+    this.sent = [];
+    this.deliveryDest = {
+      destinationHash: new Uint8Array(16).fill(7),
+    };
+  }
+  async init() {
+    this.initCalls += 1;
+  }
+  async announce(name) {
+    this.announceCalls.push(name);
+  }
+  async send(message, identity) {
+    this.sent.push({ message, identity });
+  }
+}
+
+/** A fake LXMessage that just records its constructor options. */
+class FakeLXMessage {
+  constructor(options) {
+    this.options = options;
+  }
+}
+
+const REAL_DEPS = { ...deps };
+
+test("setupMessaging inits the router and announces the display name", async () => {
+  deps.LXMRouter = FakeLxmRouter;
+  deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
+  const logs = [];
+
+  const router = await setupMessaging(
+    {},
+    "IDENTITY",
+    { displayName: "Boat" },
+    (...a) => logs.push(a.join(" ")),
+  );
+
+  assert.equal(router.initCalls, 1);
+  assert.deepEqual(router.announceCalls, ["Boat"]);
+  assert.ok(logs.some((l) => /Announced LXMF destination/.test(l)));
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("setupMessaging logs but does not throw when announce fails", async () => {
+  deps.LXMRouter = class extends FakeLxmRouter {
+    async announce() {
+      throw new Error("nope");
+    }
+  };
+  deps.toHex = () => "00";
+  const logs = [];
+
+  const router = await setupMessaging({}, {}, { displayName: "Boat" }, (...a) =>
+    logs.push(a.join(" ")),
+  );
+
+  assert.ok(router, "router still returned");
+  assert.ok(logs.some((l) => /Failed to announce LXMF destination/.test(l)));
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("setupMessaging skips announce when no display name is given", async () => {
+  deps.LXMRouter = FakeLxmRouter;
+
+  const router = await setupMessaging({}, {}, {});
+
+  assert.equal(router.announceCalls.length, 0);
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeDeliverer builds and sends an LXMessage via the router", async () => {
+  const router = new FakeLxmRouter({}, {});
+  const identity = { id: "me" };
+  deps.LXMessage = FakeLXMessage;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const deliver = makeDeliverer(router, identity);
+  await deliver("0123456789abcdef0123456789abcdef", "Title", "Body");
+
+  assert.equal(router.sent.length, 1);
+  const { message, identity: sentIdentity } = router.sent[0];
+  assert.equal(sentIdentity, identity);
+  assert.deepEqual(message.options, {
+    sourceHash: router.deliveryDest.destinationHash,
+    destinationHash: Buffer.from("0123456789abcdef0123456789abcdef", "hex"),
+    title: "Title",
+    content: "Body",
+  });
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeDeliverer propagates delivery errors", async () => {
+  const router = new FakeLxmRouter({}, {});
+  router.send = async () => {
+    throw new Error("identity unknown");
+  };
+  deps.LXMessage = FakeLXMessage;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const deliver = makeDeliverer(router, {});
+  await assert.rejects(
+    () => deliver("0123456789abcdef0123456789abcdef", "t", "c"),
+    /identity unknown/,
+  );
+
+  Object.assign(deps, REAL_DEPS);
+});

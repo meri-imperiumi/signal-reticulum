@@ -13,6 +13,8 @@ const {
   setupInterfaces,
   teardownInterfaces,
 } = require("./interfaces");
+const { sendNotification } = require("./notifications");
+const { setupMessaging, makeDeliverer } = require("./messaging");
 
 /**
  * Overridable dependencies (the Reticulum orchestrator class and the interface
@@ -25,6 +27,11 @@ const deps = {
 };
 
 module.exports = (app) => {
+  /** Tracks active notification episodes so flapping alerts aren't re-sent. */
+  const episodes = new Map();
+  /** Signal K subscription unsubscribe callbacks, drained on stop. */
+  const unsubscribes = [];
+
   /** @type {import("@signalk/server-api").Plugin} */
   const plugin = {
     id: "signalk-reticulum",
@@ -37,6 +44,11 @@ module.exports = (app) => {
     rns: undefined,
     /** Connected interface instances (available after start). */
     interfaces: [],
+    /**
+     * The LXMF router (available after start). Exposed so inbound LXMF message
+     * handling can be added later by attaching to its `"message"` events.
+     */
+    lxmf: undefined,
 
     /**
      * Resolves (or generates) the identity, brings up the Reticulum node and
@@ -49,6 +61,7 @@ module.exports = (app) => {
       plugin.identity = undefined;
       plugin.rns = undefined;
       plugin.interfaces = [];
+      plugin.lxmf = undefined;
 
       let resolved;
       try {
@@ -98,6 +111,69 @@ module.exports = (app) => {
         );
         plugin.interfaces = result.connected;
 
+        // Bring up LXMF messaging so alerts can be sent to the crew. A failure
+        // here is non-fatal: the node stays up for connectivity, just without
+        // messaging (deliver stays undefined and alerts are skipped).
+        let deliver;
+        try {
+          const displayName =
+            (config && config.messaging && config.messaging.display_name) ||
+            "Signal K";
+          plugin.lxmf = await setupMessaging(
+            rns,
+            plugin.identity,
+            { displayName },
+            app.debug,
+          );
+          deliver = makeDeliverer(plugin.lxmf, plugin.identity);
+        } catch (e) {
+          app.debug(`Messaging setup error: ${e.message}`);
+        }
+
+        // Subscribe to Signal K notifications so alarm/emergency states are
+        // forwarded to the crew over LXMF.
+        if (app.subscriptionmanager) {
+          try {
+            app.subscriptionmanager.subscribe(
+              {
+                context: "vessels.self",
+                subscribe: [{ path: "notifications.*", policy: "instant" }],
+              },
+              unsubscribes,
+              (err) => app.error(`Notification subscription error: ${err}`),
+              (delta) => {
+                if (!delta || !delta.updates) {
+                  return;
+                }
+                for (const update of delta.updates) {
+                  if (!update.values) {
+                    continue;
+                  }
+                  for (const v of update.values) {
+                    if (!v.path || v.path.indexOf("notifications.") !== 0) {
+                      continue;
+                    }
+                    Promise.resolve(
+                      sendNotification(
+                        v.path,
+                        v.value,
+                        episodes,
+                        config,
+                        deliver,
+                        app,
+                      ),
+                    ).catch((e) =>
+                      app.debug(`Notification forward error: ${e.message}`),
+                    );
+                  }
+                }
+              },
+            );
+          } catch (e) {
+            app.debug(`Notification subscription error: ${e.message}`);
+          }
+        }
+
         const summary =
           `Identity ${hashHex}, ` +
           `${result.connected.length} interface(s) connected`;
@@ -121,6 +197,14 @@ module.exports = (app) => {
      */
     async stop() {
       app.debug("Stopping");
+      unsubscribes.splice(0).forEach((fn) => {
+        try {
+          fn();
+        } catch {
+          /* best effort */
+        }
+      });
+      episodes.clear();
       const rns = plugin.rns;
       const interfaces = plugin.interfaces || [];
       try {
@@ -130,6 +214,7 @@ module.exports = (app) => {
       } catch (e) {
         app.debug(`Teardown error: ${e.message}`);
       }
+      plugin.lxmf = undefined;
       plugin.identity = undefined;
       plugin.rns = undefined;
       plugin.interfaces = [];

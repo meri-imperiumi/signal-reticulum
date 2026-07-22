@@ -37,7 +37,12 @@ test("buildPluginSchema returns a draft-07 object schema with the interfaces gro
   assert.equal(schema.$schema, "http://json-schema.org/draft-07/schema#");
   assert.equal(schema.type, "object");
   assert.equal(schema.title, "Signal K Reticulum");
-  assert.deepEqual(Object.keys(schema.properties), ["interfaces", "identity"]);
+  assert.deepEqual(Object.keys(schema.properties), [
+    "interfaces",
+    "identity",
+    "messaging",
+    "crew",
+  ]);
   assert.equal(schema.properties.interfaces.type, "array");
   assert.equal(schema.properties.interfaces.items.oneOf.length, 0);
 });

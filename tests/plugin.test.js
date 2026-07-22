@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const RNS = require("reticulum-js");
 const { toHex } = RNS;
 const makePlugin = require("../plugin/index.js");
+const messaging = require("../plugin/messaging");
 
 // --- Fakes so the plugin can be started without any real network I/O --------
 
@@ -47,6 +48,43 @@ makePlugin.deps.getInterface = (id) => {
   return undefined;
 };
 
+// --- Fakes so the plugin's LXMF messaging can be exercised without RNS I/O ---
+
+class FakeLxmRouter {
+  constructor(identity, rns) {
+    this.identity = identity;
+    this.rns = rns;
+    this.initCalls = 0;
+    this.announceCalls = [];
+    this.sent = [];
+    this.deliveryDest = {
+      destinationHash: new Uint8Array(16).fill(9),
+    };
+    FakeLxmRouter.instances.push(this);
+  }
+  async init() {
+    this.initCalls += 1;
+  }
+  async announce(name) {
+    this.announceCalls.push(name);
+  }
+  async send(message, identity) {
+    this.sent.push({ message, identity });
+  }
+}
+FakeLxmRouter.instances = [];
+
+class FakeLXMessage {
+  constructor(options) {
+    this.options = options;
+  }
+}
+
+messaging.deps.LXMRouter = FakeLxmRouter;
+messaging.deps.LXMessage = FakeLXMessage;
+messaging.deps.fromHex = (hex) => Buffer.from(hex, "hex");
+messaging.deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
+
 /** Minimal stand-in for the Signal K ServerAPI the plugin touches. */
 function makeApp() {
   /** @type {any} */
@@ -67,6 +105,17 @@ function makeApp() {
     savePluginOptions(options, cb) {
       app.savedOptions.push(options);
       if (cb) setImmediate(cb, null);
+    },
+    subscriptionmanager: {
+      subscriptions: [],
+      subscribe(spec, unsubs, onError, onDelta) {
+        app.subscriptionmanager.subscriptions.push(spec);
+        unsubs.push(() => {
+          app.subscriptionmanager.unsubscribed = true;
+        });
+        app._onDelta = onDelta;
+        app._onError = onError;
+      },
     },
   };
   return app;
@@ -124,7 +173,12 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
   const plugin = makePlugin(makeApp());
   const schema = plugin.schema();
 
-  assert.deepEqual(Object.keys(schema.properties), ["interfaces", "identity"]);
+  assert.deepEqual(Object.keys(schema.properties), [
+    "interfaces",
+    "identity",
+    "messaging",
+    "crew",
+  ]);
   const identity = schema.properties.identity;
   assert.ok("publicKey" in identity.properties);
   assert.ok("privateKey" in identity.properties);
@@ -242,4 +296,159 @@ test("stop tears down every connected interface and clears state", async () => {
   assert.equal(plugin.identity, undefined);
   assert.equal(plugin.interfaces.length, 0);
   assert.equal(app.statusCalls[app.statusCalls.length - 1], "Stopped");
+});
+
+test("schema exposes messaging and crew configuration groups", () => {
+  const plugin = makePlugin(makeApp());
+  const schema = plugin.schema();
+
+  const messagingGroup = schema.properties.messaging;
+  assert.equal(messagingGroup.properties.send_alerts.default, true);
+  assert.equal(messagingGroup.properties.display_name.default, "Signal K");
+
+  const crewGroup = schema.properties.crew;
+  assert.equal(crewGroup.type, "array");
+  assert.deepEqual(crewGroup.items.required, ["name", "destination"]);
+  assert.equal(
+    crewGroup.items.properties.destination.pattern,
+    "^[0-9a-fA-F]{32}$",
+  );
+});
+
+test("start brings up LXMF messaging, announces, and subscribes to notifications", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeLxmRouter.instances.length = 0;
+
+  await plugin.start({ messaging: { display_name: "My Boat" } });
+
+  assert.ok(plugin.lxmf instanceof FakeLxmRouter, "LXMF router created");
+  assert.equal(plugin.lxmf.initCalls, 1);
+  assert.deepEqual(plugin.lxmf.announceCalls, ["My Boat"]);
+
+  const subs = app.subscriptionmanager.subscriptions;
+  assert.ok(
+    subs.some(
+      (s) =>
+        s.subscribe &&
+        s.subscribe.some((sub) => sub.path === "notifications.*"),
+    ),
+    "subscribed to notifications.*",
+  );
+});
+
+test("an alarm notification is forwarded to each crew member over LXMF", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+
+  await plugin.start({
+    messaging: { send_alerts: true },
+    crew: [{ name: "Alice", destination: dest }],
+  });
+
+  const router = plugin.lxmf;
+  assert.equal(router.sent.length, 0);
+
+  app._onDelta({
+    updates: [
+      {
+        values: [
+          {
+            path: "notifications.electrical.bilge",
+            value: { state: "alarm", message: "Bilge high!" },
+          },
+        ],
+      },
+    ],
+  });
+
+  // The forwarding is async; let it flush.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(router.sent.length, 1, "one LXMF message sent to the crew");
+  const sent = router.sent[0].message.options;
+  assert.deepEqual(sent.destinationHash, Buffer.from(dest, "hex"));
+  assert.equal(sent.title, "Signal K: electrical.bilge");
+  assert.equal(sent.content, "Bilge high!");
+});
+
+test("an emergency is forwarded, but a nominal notification is not", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+
+  await plugin.start({
+    messaging: { send_alerts: true },
+    crew: [{ name: "Alice", destination: dest }],
+  });
+  const router = plugin.lxmf;
+
+  app._onDelta({
+    updates: [
+      {
+        values: [
+          {
+            path: "notifications.fire",
+            value: { state: "emergency", message: "Fire!" },
+          },
+        ],
+      },
+    ],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(router.sent.length, 1, "emergency forwarded");
+
+  app._onDelta({
+    updates: [
+      {
+        values: [
+          {
+            path: "notifications.fire",
+            value: { state: "nominal", message: "ok" },
+          },
+        ],
+      },
+    ],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(router.sent.length, 1, "nominal clearing not forwarded");
+});
+
+test("alerts are not forwarded when send_alerts is disabled", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+
+  await plugin.start({
+    messaging: { send_alerts: false },
+    crew: [{ name: "Alice", destination: "0123456789abcdef0123456789abcdef" }],
+  });
+
+  app._onDelta({
+    updates: [
+      {
+        values: [
+          {
+            path: "notifications.x",
+            value: { state: "alarm", message: "x" },
+          },
+        ],
+      },
+    ],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(plugin.lxmf.sent.length, 0);
+});
+
+test("stop tears down messaging and the notification subscription", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  await plugin.start({ messaging: {} });
+  assert.ok(plugin.lxmf);
+
+  await plugin.stop();
+
+  assert.equal(plugin.lxmf, undefined);
+  assert.equal(app.subscriptionmanager.unsubscribed, true);
 });

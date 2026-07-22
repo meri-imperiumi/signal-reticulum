@@ -1,7 +1,41 @@
 # Signal K integration with Reticulum Network System
 
-This plugin aims to connect the [Signal K](https://signalk.org/) marine platform with the [Reticulum](https://reticulum.network/) mesh networking stack.
+This plugin connects the [Signal K](https://signalk.org/) marine platform with the [Reticulum](https://reticulum.network/) mesh networking stack, giving the boat a presence on the Reticulum mesh and enabling long-range, off-grid messaging with the crew.
+
+## Features
+
+- **Reticulum connectivity** — brings up a Reticulum node with the configured interfaces (TCP, AutoInterface peering, …), defaulting to zero-config `AutoInterface` peering when none are configured.
+- **Persistent identity** — generates and stores a Reticulum identity on first start, or reuses one you provide.
+- **LXMF messaging** — registers the standard `lxmf.delivery` destination and announces the node to the mesh.
+- **Crew alerts** — when Signal K raises a notification at the `alarm` or `emergency` level, an LXMF message is sent to each configured crew member.
+
+## Configuration
+
+### Identity
+
+On first start a new Reticulum identity is generated and stored in the plugin configuration. To reuse an existing Reticulum identity instead, paste its private key (128 bytes / 256 hex characters) into the **Identity** group.
+
+### Interfaces
+
+Any number of Reticulum interfaces of any available type may be configured. When none are configured, an `AutoInterface` (zero-config LAN/Wi-Fi peering) is started by default.
+
+### Crew members
+
+Each crew member is identified by the `lxmf.delivery` destination hash of their Reticulum device (32 hexadecimal characters). Add one entry per crew member under **Crew members**. These are the recipients of alert messages.
+
+### Messaging
+
+- **Send Signal K alerts to the crew via LXMF** — when enabled (default), `alarm`/`emergency` notifications are forwarded to the crew.
+- **LXMF display name** — the name announced to the mesh for this node's `lxmf.delivery` destination, shown on crew members' messaging devices.
+
+## How alerting works
+
+The plugin subscribes to `notifications.*` on `vessels.self`. When a notification transitions into the `alarm` or `emergency` state, an LXMF message is delivered to each crew member's destination hash.
+
+A flapping alert (e.g. a bilge sensor switching rapidly on and off) is only forwarded once per active episode. Once the notification clears, it is held for a debounce period before a new occurrence of the same alert will be forwarded again.
+
+Delivery is **opportunistic** by default: each message is sent as a single encrypted Reticulum packet addressed to the recipient's `lxmf.delivery` destination. This requires the recipient's identity to be known to the node (learned from the recipient announcing). Store-and-forward delivery via a propagation node is planned.
 
 ## Status
 
-So far only sketches
+Early development.
