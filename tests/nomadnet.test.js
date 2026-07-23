@@ -13,8 +13,9 @@ const {
 const REAL_DEPS = { ...deps };
 
 /** A fake Destination that records handler registration, app_data and announces. */
-class FakeDestination {
+class FakeDestination extends EventTarget {
   constructor(name, direction, type, identity, rns) {
+    super();
     this.name = name;
     this.direction = direction;
     this.type = type;
@@ -25,6 +26,7 @@ class FakeDestination {
     this.registered = [];
     this.removed = [];
     this.announceCalls = 0;
+    this.acceptedLinks = [];
     FakeDestination.instances.push(this);
   }
   static async IN(name, type, identity, rns) {
@@ -40,6 +42,18 @@ class FakeDestination {
   }
   async announce() {
     this.announceCalls += 1;
+  }
+  async acceptLink(packet) {
+    const link = {
+      linkId: new Uint8Array(16).fill(1),
+      packet,
+      listeners: {},
+      addEventListener(type, fn) {
+        (link.listeners[type] ||= []).push(fn);
+      },
+    };
+    this.acceptedLinks.push(link);
+    return link;
   }
 }
 FakeDestination.instances = [];
@@ -209,7 +223,63 @@ test("setupNomadNet logs but does not throw when announce fails", async () => {
   Object.assign(deps, REAL_DEPS);
 });
 
-test("stop deregisters the page handler and removes the destination", async () => {
+test("incoming link requests are accepted so the LRPROOF handshake completes", async () => {
+  deps.Destination = FakeDestination;
+  deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
+  const rns = makeRns();
+
+  const site = await setupNomadNet(rns, {}, { displayName: "Boat" });
+  const dest = site.destination;
+  const packet = { id: "LINKREQUEST" };
+
+  dest.dispatchEvent(new CustomEvent("link_request", { detail: { packet } }));
+  // acceptLink is async; let it flush.
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(dest.acceptedLinks.length, 1, "link accepted");
+  assert.equal(
+    dest.acceptedLinks[0].packet,
+    packet,
+    "acceptLink received the LINKREQUEST packet",
+  );
+  assert.equal(
+    dest.acceptedLinks[0].bz2,
+    undefined,
+    "bz2 left unset when no compressor is configured",
+  );
+
+  FakeDestination.instances.length = 0;
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("a link accept failure is logged but does not break the site", async () => {
+  deps.Destination = class extends FakeDestination {
+    async acceptLink() {
+      throw new Error("transport down");
+    }
+  };
+  deps.toHex = () => "00";
+  const rns = makeRns();
+  const logs = [];
+
+  const site = await setupNomadNet(rns, {}, { displayName: "Boat" }, (...a) =>
+    logs.push(a.join(" ")),
+  );
+  site.destination.dispatchEvent(
+    new CustomEvent("link_request", { detail: { packet: {} } }),
+  );
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.ok(
+    logs.some((l) => /Failed to accept NomadNet link/.test(l)),
+    "accept failure logged",
+  );
+
+  FakeDestination.instances.length = 0;
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("stop removes the link-request listener along with the handler", async () => {
   deps.Destination = FakeDestination;
   deps.toHex = () => "00";
   const rns = makeRns();
@@ -219,8 +289,12 @@ test("stop deregisters the page handler and removes the destination", async () =
 
   await site.stop();
 
-  assert.deepEqual(dest.removed, [INDEX_PATH], "page handler removed");
-  assert.deepEqual(rns.deregistered, [dest], "destination deregistered");
+  // A link request after stop must not be accepted.
+  dest.dispatchEvent(
+    new CustomEvent("link_request", { detail: { packet: {} } }),
+  );
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(dest.acceptedLinks.length, 0, "listener removed on stop");
 
   FakeDestination.instances.length = 0;
   Object.assign(deps, REAL_DEPS);

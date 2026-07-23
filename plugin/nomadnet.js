@@ -97,6 +97,28 @@ async function setupNomadNet(rns, identity, options = {}, log = () => {}) {
     allow: deps.Allow.ALL,
   });
 
+  // Accept incoming Links so page REQUESTs can be served. Without this the
+  // destination is only *visible* (announce heard) but never completes the
+  // LINKREQUEST/LRPROOF handshake, so every client's link times out before it
+  // can fetch /page/index.mu. acceptLink sends the LRPROOF and registers the
+  // link with the transport; the Link then dispatches REQUEST packets to the
+  // registered request handlers automatically. (Mirrors LXMRouter's
+  // propagation-node / delivery-destination wiring.)
+  /** @type {((event:any)=>Promise<void>)|null} */
+  const onLinkRequest = async (event) => {
+    try {
+      const link = await dest.acceptLink(
+        event && event.detail && event.detail.packet,
+      );
+      // Inject the compressor so compressed inbound resources can be inflated
+      // (harmless when no provider is configured).
+      link.bz2 = rns.compressionProvider || undefined;
+    } catch (e) {
+      log(`Failed to accept NomadNet link: ${e.message}`);
+    }
+  };
+  dest.addEventListener("link_request", onLinkRequest);
+
   try {
     await dest.announce();
     log(
@@ -117,6 +139,13 @@ async function setupNomadNet(rns, identity, options = {}, log = () => {}) {
      * Best-effort: per-step failures are swallowed so teardown always completes.
      */
     async stop() {
+      if (onLinkRequest) {
+        try {
+          dest.removeEventListener("link_request", onLinkRequest);
+        } catch {
+          /* best effort */
+        }
+      }
       try {
         await dest.removeRequestHandler(INDEX_PATH);
       } catch {

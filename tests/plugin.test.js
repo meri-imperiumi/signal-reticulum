@@ -149,8 +149,9 @@ messaging.deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
 
 // --- Fakes so the plugin's NomadNet site can be exercised without RNS I/O ---
 
-class FakeNomadDestination {
+class FakeNomadDestination extends EventTarget {
   constructor(name, direction, type, identity, rns) {
+    super();
     this.name = name;
     this.type = type;
     this.identity = identity;
@@ -160,6 +161,7 @@ class FakeNomadDestination {
     this.registered = [];
     this.removed = [];
     this.announceCalls = 0;
+    this.acceptedLinks = [];
     FakeNomadDestination.instances.push(this);
   }
   static async IN(name, type, identity, rns) {
@@ -175,6 +177,18 @@ class FakeNomadDestination {
   }
   async announce() {
     this.announceCalls += 1;
+  }
+  async acceptLink(packet) {
+    const link = {
+      linkId: new Uint8Array(16).fill(1),
+      packet,
+      listeners: {},
+      addEventListener(type, fn) {
+        (link.listeners[type] ||= []).push(fn);
+      },
+    };
+    this.acceptedLinks.push(link);
+    return link;
   }
 }
 FakeNomadDestination.instances = [];

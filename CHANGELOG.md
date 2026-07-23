@@ -12,6 +12,9 @@
 - Switched from the monolithic `reticulum-js` package to the split `@reticulum/core` (protocol stack, identity, LXMF, utilities) and `@reticulum/node` (Node.js interfaces and the interface registry) packages
 - Shared-instance connection now uses `LocalClientInterface.connectToSharedInstance` from `@reticulum/node` directly (the node no longer exposes it), and the plugin attaches the returned interface to the transport itself
 
+### Fixed
+- NomadNet clients could see the announced node but their page requests timed out: the `nomadnetwork.node` destination now accepts incoming LINKREQUESTs (sending the LRPROOF that completes the link handshake) instead of only being visible. Page REQUESTs are then served over the established link
+
 ### Added
 - Ability to configure and connect to various Reticulum interfaces
 - Optional shared Reticulum instance support: reuse a locally running `rnsd` and its mesh interfaces, enabled by default with automatic fallback to the configured interfaces
