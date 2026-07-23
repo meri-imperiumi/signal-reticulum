@@ -291,6 +291,7 @@ module.exports = (app) => {
                   banner: config.nomadnet && config.nomadnet.banner,
                   telemetry: {
                     state: readSelf(app, "navigation.state"),
+                    position: readSelf(app, "navigation.position"),
                     anchorDistance: readSelf(
                       app,
                       "navigation.anchor.distanceFromBow",

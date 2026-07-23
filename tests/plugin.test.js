@@ -789,6 +789,7 @@ test("the served index page includes live telemetry from Signal K", async () => 
   const paths = {
     name: { value: "S/Y Bergie" },
     "navigation.state": { value: "anchored" },
+    "navigation.position": { value: { latitude: 60.1234, longitude: 21.5678 } },
     "navigation.anchor.distanceFromBow": { value: 12.3 },
     "environment.depth.belowSurface": { value: 5.2 },
     "environment.tide.heightNow": { value: 1.3 },
@@ -810,10 +811,11 @@ test("the served index page includes live telemetry from Signal K", async () => 
   assert.match(text, />>S\/Y Bergie/);
   assert.match(text, />Vessel status/);
   assert.match(text, /Vessel is anchored/);
+  assert.match(text, /Position: 60\u00B007.404' N, 021\u00B034.068' E/);
   assert.match(text, /Anchor: 12.3 m from bow/);
   assert.match(text, /Depth: 5.2 m below surface/);
   assert.match(text, /Tide: 1.3 m, rising/);
-  assert.match(text, /Wind: 12 kn at 45\u00B0/);
+  assert.match(text, /Wind: 12 kn from 45\u00B0/);
   assert.match(text, /Battery: 87 %, 2.3 A/);
 });
 

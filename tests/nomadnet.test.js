@@ -7,6 +7,7 @@ const {
   renderPage,
   readNumber,
   formatVesselState,
+  formatPosition,
   formatAnchorDistance,
   formatDepth,
   formatTide,
@@ -128,6 +129,51 @@ test("formatVesselState renders 'Vessel is <state>'", () => {
   assert.equal(formatVesselState(""), "");
 });
 
+test("formatPosition converts decimal degrees to degrees and decimal minutes", () => {
+  assert.equal(
+    formatPosition({ latitude: 60.1234, longitude: 21.5678 }),
+    "Position: 60\u00B007.404' N, 021\u00B034.068' E",
+  );
+});
+
+test("formatPosition handles southern and western hemispheres", () => {
+  assert.equal(
+    formatPosition({ latitude: -60.1234, longitude: -21.5678 }),
+    "Position: 60\u00B007.404' S, 021\u00B034.068' W",
+  );
+});
+
+test("formatPosition unwraps the {value} delta wrapper", () => {
+  assert.equal(
+    formatPosition({ value: { latitude: 60.1234, longitude: 21.5678 } }),
+    "Position: 60\u00B007.404' N, 021\u00B034.068' E",
+  );
+});
+
+test("formatPosition renders a coordinate on its own when the other is missing", () => {
+  assert.equal(
+    formatPosition({ latitude: 60.1234 }),
+    "Position: 60\u00B007.404' N",
+  );
+  assert.equal(
+    formatPosition({ longitude: 21.5678 }),
+    "Position: 021\u00B034.068' E",
+  );
+});
+
+test("formatPosition renders zero coordinates instead of dropping them", () => {
+  assert.equal(
+    formatPosition({ latitude: 0, longitude: 0 }),
+    "Position: 00\u00B000.000' N, 000\u00B000.000' E",
+  );
+});
+
+test("formatPosition returns empty when no position is reported", () => {
+  assert.equal(formatPosition(undefined), "");
+  assert.equal(formatPosition({}), "");
+  assert.equal(formatPosition({ value: {} }), "");
+});
+
 test("formatAnchorDistance renders distance from bow in metres", () => {
   assert.equal(formatAnchorDistance(12.56), "Anchor: 12.6 m from bow");
   assert.equal(formatAnchorDistance({ value: 0 }), "Anchor: 0.0 m from bow");
@@ -148,9 +194,9 @@ test("formatTide renders height and state together or separately", () => {
 });
 
 test("formatWind converts m/s to knots and radians to degrees", () => {
-  assert.equal(formatWind(6, Math.PI / 4), "Wind: 12 kn at 45\u00B0");
+  assert.equal(formatWind(6, Math.PI / 4), "Wind: 12 kn from 45\u00B0");
   assert.equal(formatWind(6, undefined), "Wind: 12 kn");
-  assert.equal(formatWind(undefined, Math.PI / 2), "Wind: 90\u00B0");
+  assert.equal(formatWind(undefined, Math.PI / 2), "Wind: from 90\u00B0");
   assert.equal(formatWind(undefined, undefined), "");
 });
 
@@ -187,6 +233,7 @@ test("renderPage appends a Vessel status section when telemetry is available", (
     vesselName: "S/Y Bergie",
     telemetry: {
       state: "anchored",
+      position: { latitude: 60.1234, longitude: 21.5678 },
       anchorDistance: 12.34,
       depth: 5.2,
       tideHeight: 1.3,
@@ -203,10 +250,11 @@ test("renderPage appends a Vessel status section when telemetry is available", (
       "\n" +
       ">Vessel status\n" +
       "Vessel is anchored\n" +
+      "Position: 60\u00B007.404' N, 021\u00B034.068' E\n" +
       "Anchor: 12.3 m from bow\n" +
       "Depth: 5.2 m below surface\n" +
       "Tide: 1.3 m, rising\n" +
-      "Wind: 12 kn at 45\u00B0\n" +
+      "Wind: 12 kn from 45\u00B0\n" +
       "Battery: 87 %, 2.3 A\n",
   );
 });

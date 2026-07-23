@@ -74,6 +74,76 @@ function formatVesselState(state) {
 }
 
 /**
+ * Unwraps a `navigation.position` value into its numeric latitude and
+ * longitude, tolerating plain `{latitude, longitude}` objects and
+ * `{value: {latitude, longitude}}` update wrappers. Partial values (only one
+ * coordinate present) are still returned; `undefined` is returned only when
+ * neither coordinate is a finite number.
+ *
+ * @param {unknown} position
+ * @returns {{latitude?: number, longitude?: number}|undefined}
+ */
+function readPosition(position) {
+  if (position && typeof position === "object" && "value" in position) {
+    position = position.value;
+  }
+  if (!position || typeof position !== "object") {
+    return undefined;
+  }
+  const latitude = readNumber(position.latitude);
+  const longitude = readNumber(position.longitude);
+  if (latitude === undefined && longitude === undefined) {
+    return undefined;
+  }
+  return { latitude, longitude };
+}
+
+/**
+ * Formats a decimal coordinate as degrees and decimal minutes with a
+ * hemisphere suffix — e.g. `60.1234` → `60°07.404' N`. Latitudes use a
+ * two-digit degree field and N/S, longitudes a three-digit field and E/W,
+ * matching how positions are written on nautical charts.
+ *
+ * @param {number} deg - Decimal degrees.
+ * @param {boolean} isLat - `true` for latitude (N/S), `false` for longitude (E/W).
+ * @returns {string}
+ */
+function formatCoord(deg, isLat) {
+  const hemisphere = isLat ? (deg >= 0 ? "N" : "S") : deg >= 0 ? "E" : "W";
+  const abs = Math.abs(deg);
+  const whole = Math.floor(abs);
+  const minutes = (abs - whole) * 60;
+  const degWidth = isLat ? 2 : 3;
+  const degStr = String(whole).padStart(degWidth, "0");
+  const minStr = minutes.toFixed(3).padStart(6, "0");
+  return `${degStr}\u00B0${minStr}' ${hemisphere}`;
+}
+
+/**
+ * Renders the navigation.position as
+ * "Position: 60°07.404' N, 021°34.068' E", converting decimal degrees to
+ * degrees and decimal minutes. Either coordinate may be absent.
+ *
+ * @param {unknown} position - Value at `navigation.position`
+ *   (`{latitude, longitude}`, optionally `{value}` wrapped).
+ * @returns {string} Empty when no position is reported.
+ */
+function formatPosition(position) {
+  const pos = readPosition(position);
+  if (!pos) {
+    return "";
+  }
+  const parts = [];
+  if (pos.latitude !== undefined) {
+    parts.push(formatCoord(pos.latitude, true));
+  }
+  if (pos.longitude !== undefined) {
+    parts.push(formatCoord(pos.longitude, false));
+  }
+  return parts.length ? `Position: ${parts.join(", ")}` : "";
+}
+
+/**
  * Renders the anchor watch distance as "Anchor: 12.5 m from bow".
  *
  * @param {unknown} distance - Value at `navigation.anchor.distanceFromBow` (m).
@@ -119,8 +189,9 @@ function formatTide(height, state) {
 }
 
 /**
- * Renders the wind as "Wind: 12 kn at 45°", converting m/s → knots and
- * radians → degrees. Either part may be absent.
+ * Renders the wind as "Wind: 12 kn from 45°", converting m/s → knots and
+ * radians → degrees. The direction is the bearing the wind blows *from*, so
+ * it is prefixed with "from"; either part may be absent.
  *
  * @param {unknown} speedMs - Value at `environment.wind.speedOverGround` (m/s).
  * @param {unknown} directionRad - Value at `environment.wind.directionTrue` (rad).
@@ -137,9 +208,9 @@ function formatWind(speedMs, directionRad) {
     parts.push(`${Math.round(speed * MS_TO_KNOTS)} kn`);
   }
   if (dir !== undefined) {
-    parts.push(`${Math.round(dir * RAD_TO_DEG)}\u00B0`);
+    parts.push(`from ${Math.round(dir * RAD_TO_DEG)}\u00B0`);
   }
-  return `Wind: ${parts.join(" at ")}`;
+  return `Wind: ${parts.join(" ")}`;
 }
 
 /**
@@ -174,15 +245,17 @@ function formatBattery(stateOfCharge, current) {
  * `context.banner` is set, otherwise the vessel name as a micron heading (a
  * line beginning with `>` is a NomadNet section header). When any telemetry is
  * available a ">Vessel status" section is appended with one plain line per
- * reading (state, anchor, depth, tide, wind, battery); absent readings are
- * omitted so the page never shows empty placeholders.
+ * reading (state, position, anchor, depth, tide, wind, battery); absent
+ * readings are omitted so the page never shows empty placeholders.
  *
  * The context is evaluated per-request so live values stay current.
  *
  * @param {object} [context]
  * @param {unknown} [context.vesselName] - Value at `vessels.self.name`.
  * @param {unknown} [context.banner] - Optional multi-line ASCII/micron banner.
- * @param {object} [context.telemetry] - Raw Signal K self-path values.
+ * @param {object} [context.telemetry] - Raw Signal K self-path values. The
+ *   `position` key takes the `navigation.position` object
+ *   (`{latitude, longitude}`, optionally `{value}` wrapped).
  * @returns {string} Micron markup.
  */
 function renderPage(context = {}) {
@@ -196,6 +269,7 @@ function renderPage(context = {}) {
   const tel = cfg.telemetry || {};
   const body = [
     formatVesselState(tel.state),
+    formatPosition(tel.position),
     formatAnchorDistance(tel.anchorDistance),
     formatDepth(tel.depth),
     formatTide(tel.tideHeight, tel.tideState),
@@ -363,6 +437,7 @@ module.exports = {
   readString,
   readNumber,
   formatVesselState,
+  formatPosition,
   formatAnchorDistance,
   formatDepth,
   formatTide,
