@@ -10,6 +10,7 @@ This plugin connects the [Signal K](https://signalk.org/) marine platform with t
 - **LXMF messaging** — registers the standard `lxmf.delivery` destination and announces the node to the mesh.
 - **Crew alerts** — when Signal K raises a notification at the `alarm` or `emergency` level, an LXMF message is sent to each configured crew member.
 - **Incoming commands** — the node receives LXMF messages and answers text commands from any peer, starting with `ping` (replies `pong`).
+- **NomadNet site** — the plugin serves a NomadNet site showing the basic vessel state
 
 ## Configuration
 

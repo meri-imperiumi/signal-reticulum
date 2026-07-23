@@ -16,7 +16,7 @@
     "reticulum",
     "rns",
     "signalk-node-server-plugin",
-    "signalk-category-hardware"
+    "signalk-category-notifications"
   ],
   "author": "Henri Bergius <henri.bergius@iki.fi>",
   "license": "EUPL-1.2",
