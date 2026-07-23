@@ -61,6 +61,29 @@ module.exports = (app) => {
   /** Signal K subscription unsubscribe callbacks, drained on stop. */
   const unsubscribes = [];
 
+  /**
+   * Builds the options object passed to the `Reticulum` constructor from the
+   * plugin config. The storage adapter is always forwarded (null when the
+   * server exposes no data directory); `logLevel` is only forwarded when the
+   * operator has configured one, so an unset value leaves Reticulum's own
+   * default / `RETICULUM_LOG_LEVEL` env var in effect.
+   *
+   * @param {object|undefined} config
+   * @param {unknown} storageAdapter
+   * @returns {{storageAdapter: unknown, logLevel?: string}}
+   */
+  function rnsOptions(config, storageAdapter) {
+    const opts = { storageAdapter };
+    const level =
+      config && typeof config.log_level === "string"
+        ? config.log_level.trim()
+        : "";
+    if (level) {
+      opts.logLevel = level;
+    }
+    return opts;
+  }
+
   /** @type {import("@signalk/server-api").Plugin} */
   const plugin = {
     id: "signalk-reticulum",
@@ -135,7 +158,7 @@ module.exports = (app) => {
             : null,
           app.debug,
         );
-        const rns = new deps.Reticulum({ storageAdapter });
+        const rns = new deps.Reticulum(rnsOptions(config, storageAdapter));
         plugin.rns = rns;
         app.debug(`Loaded Reticulum identity ${hashHex}`);
 

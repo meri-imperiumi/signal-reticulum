@@ -280,6 +280,7 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
   const schema = plugin.schema();
 
   assert.deepEqual(Object.keys(schema.properties), [
+    "log_level",
     "use_shared_instance",
     "interfaces",
     "identity",
@@ -307,6 +308,10 @@ test("start sets up the node, default AutoInterface and persists a generated ide
   assert.equal(plugin.rns.added.length, 1);
   assert.equal(plugin.rns.added[0].isDefault, true);
   assert.match(app.statusCalls[0], /Identity .*?, 1 interface\(s\) connected/);
+  assert.ok(
+    !("logLevel" in plugin.rns.config),
+    "logLevel not forwarded when unset (Reticulum default applies)",
+  );
 
   assert.equal(app.savedOptions.length, 1);
   const saved = app.savedOptions[0];
@@ -404,6 +409,41 @@ test("stop tears down every connected interface and clears state", async () => {
   assert.equal(plugin.identity, undefined);
   assert.equal(plugin.interfaces.length, 0);
   assert.equal(app.statusCalls[app.statusCalls.length - 1], "Stopped");
+});
+
+test("start forwards a configured log level to the Reticulum node", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+
+  await plugin.start({ log_level: "debug" });
+
+  assert.equal(plugin.rns.config.logLevel, "debug");
+});
+
+test("a blank log level is ignored so the Reticulum default applies", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+
+  await plugin.start({ log_level: "   " });
+
+  assert.ok(!("logLevel" in plugin.rns.config));
+});
+
+test("schema exposes a Reticulum log level selector defaulting to notice", () => {
+  const plugin = makePlugin(makeApp());
+  const logLevel = plugin.schema().properties.log_level;
+
+  assert.equal(logLevel.type, "string");
+  assert.equal(logLevel.default, "notice");
+  assert.deepEqual(logLevel.enum, [
+    "critical",
+    "error",
+    "warning",
+    "notice",
+    "info",
+    "verbose",
+    "debug",
+  ]);
 });
 
 test("schema exposes messaging and crew configuration groups", () => {

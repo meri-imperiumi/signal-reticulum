@@ -83,6 +83,26 @@ function buildPluginSchema(interfaces) {
     type: "object",
     title: "Signal K Reticulum",
     properties: {
+      log_level: {
+        type: "string",
+        title: "Reticulum log level",
+        description:
+          "Verbosity of the Reticulum stack's own diagnostic output " +
+          "(transport, links, announces, pathing) written to the Signal K " +
+          "server log. The default (Notice) keeps important operational events; " +
+          "raise it for troubleshooting or lower it to reduce log noise. This " +
+          "is independent of the plugin's own messages.",
+        default: "notice",
+        enum: [
+          "critical",
+          "error",
+          "warning",
+          "notice",
+          "info",
+          "verbose",
+          "debug",
+        ],
+      },
       use_shared_instance: {
         type: "boolean",
         title: "Use shared Reticulum instance",
