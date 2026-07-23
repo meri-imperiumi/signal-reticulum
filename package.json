@@ -24,6 +24,16 @@
     "url": "https://github.com/meri-imperiumi/signalk-reticulum/issues"
   },
   "homepage": "https://github.com/meri-imperiumi/signalk-reticulum#readme",
+  "signalk-plugin-enabled-by-default": false,
+  "signalk": {
+    "appIcon": "./doc/signalk-reticulum.png",
+    "displayName": "Reticulum Network",
+    "screenshots": [
+      "./doc/alerts.jpg",
+      "./doc/telemetry-position.jpg",
+      "./doc/nomadnet.png"
+    ]
+  },
   "dependencies": {
     "@digitaldefiance/bzip2-wasm": "^1.1.1",
     "@reticulum/core": "^0.4.1",

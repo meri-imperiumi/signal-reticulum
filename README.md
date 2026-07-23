@@ -2,6 +2,8 @@
 
 This plugin connects the [Signal K](https://signalk.org/) marine platform with the [Reticulum](https://reticulum.network/) mesh networking stack, giving the boat a presence on the Reticulum mesh and enabling long-range, off-grid messaging with the crew.
 
+[Columba](https://columba.network/), [reticulum-mobile-app](https://github.com/thatSFguy/reticulum-mobile-app), and [Sideband](https://github.com/markqvist/sideband) are examples of Reticulum applications you can use to interact with this plugin.
+
 ## Features
 
 - **Reticulum connectivity** — brings up a Reticulum node with the configured interfaces (TCP, AutoInterface peering, …), defaulting to zero-config `AutoInterface` peering when none are configured.
@@ -28,9 +30,11 @@ Untick **Use shared Reticulum instance** to always open your own interfaces.
 
 Any number of Reticulum interfaces of any available type may be configured. When none are configured (and no shared instance is used), an `AutoInterface` (zero-config LAN/Wi-Fi peering) is started by default.
 
+[rns.recipes directory](https://directory.rns.recipes/) provides a list of public Reticulum interfaces you can connect to.
+
 ### Crew members
 
-Each crew member is identified by the `lxmf.delivery` destination hash of their Reticulum device (32 hexadecimal characters). Add one entry per crew member under **Crew members**. These are the recipients of alert messages.
+Each crew member is identified by the `lxmf.delivery` destination hash of their Reticulum device (32 hexadecimal characters). Add one entry per crew member under **Crew members**. These are the recipients of alert messages, and can interact with the vessel over LXMF messaging.
 
 ### Messaging
 
