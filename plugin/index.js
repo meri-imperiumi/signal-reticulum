@@ -16,6 +16,7 @@ const {
 } = require("./interfaces");
 const { sendNotification } = require("./notifications");
 const { setupMessaging, makeDeliverer } = require("./messaging");
+const { resolveDisplayName } = require("./displayname");
 const commands = require("./commands");
 
 /**
@@ -141,9 +142,12 @@ module.exports = (app) => {
         // messaging (deliver stays undefined and alerts are skipped).
         let deliver;
         try {
-          const displayName =
-            (config && config.messaging && config.messaging.display_name) ||
-            "Signal K";
+          const displayName = resolveDisplayName({
+            configured:
+              config && config.messaging && config.messaging.display_name,
+            vesselName: readSelf(app, "name"),
+            callsign: readSelf(app, "communication.callsignVhf"),
+          });
           plugin.lxmf = await setupMessaging(
             rns,
             plugin.identity,
