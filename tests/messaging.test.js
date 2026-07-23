@@ -1,7 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { deps, setupMessaging, makeDeliverer } = require("../plugin/messaging");
+const { deps, setupMessaging, makeDeliverer, makeTelemetryDeliverer } =
+  require("../plugin/messaging");
 
 /** A fake LXMRouter that records init/announce/send calls. */
 class FakeLxmRouter {
@@ -152,6 +153,47 @@ test("makeDeliverer builds and sends an LXMessage via the router", async () => {
     title: "Title",
     content: "Body",
   });
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeTelemetryDeliverer builds an LXMessage carrying FIELD_TELEMETRY with an integer field key", async () => {
+  const router = new FakeLxmRouter({}, {});
+  const identity = { id: "me" };
+  deps.LXMessage = FakeLXMessage;
+  deps.FIELD_TELEMETRY = 0x02;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const deliverTelemetry = makeTelemetryDeliverer(router, identity);
+  const packed = new Uint8Array([1, 2, 3]);
+  await deliverTelemetry("0123456789abcdef0123456789abcdef", packed);
+
+  assert.equal(router.sent.length, 1);
+  const { message, identity: sentIdentity } = router.sent[0];
+  assert.equal(sentIdentity, identity);
+  assert.equal(message.options.title, "");
+  assert.equal(message.options.content, "");
+  assert.ok(message.options.fields instanceof Map);
+  assert.equal(message.options.fields.get(0x02), packed);
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeTelemetryDeliverer propagates delivery errors", async () => {
+  const router = new FakeLxmRouter({}, {});
+  router.send = async () => {
+    throw new Error("identity unknown");
+  };
+  deps.LXMessage = FakeLXMessage;
+  deps.FIELD_TELEMETRY = 0x02;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const deliverTelemetry = makeTelemetryDeliverer(router, {});
+  await assert.rejects(
+    () =>
+      deliverTelemetry("0123456789abcdef0123456789abcdef", new Uint8Array([1])),
+    /identity unknown/,
+  );
 
   Object.assign(deps, REAL_DEPS);
 });

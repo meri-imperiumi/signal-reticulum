@@ -1,6 +1,9 @@
 # Changelog
 ## [Unreleased]
 ### Added
+- Periodic telemetry broadcast to the crew: when the new `telemetry` config group is enabled, the node builds a Sideband-compatible telemetry snapshot from Signal K and sends it to every configured crew member over LXMF (carried in the `FIELD_TELEMETRY` field) shortly after start and then on a configurable interval (default 300 s, clamped to a 30 s minimum). The snapshot is wire-compatible with Sideband's `Telemeter.packed()` format so Sideband, NomadNet and MeshChat render it in the peer telemetry view
+- Position is sent as the Sideband `location` sensor: `navigation.position` (lat/lon), `navigation.speedOverGround` (m/s → km/h) and `navigation.courseOverGroundTrue` (rad → deg), packed as the exact big-endian fixed-point integers Sideband expects
+- The same Signal K keys the NomadNet index page serves are now also emitted as telemetry sensors so both views stay consistent: house battery state of charge (0–1 → %, as the `battery` sensor) and depth, tide, wind (m/s → knots, rad → deg), anchor watch and navigation state (as `custom` sensor entries with Material Design icons)
 - NomadNet site index page now shows live telemetry (vessel state, navigation position, anchor distance, water depth, tide, wind in knots/degrees, house battery state of charge and current) when the corresponding Signal K keys are available. Readings are converted for display (m/s → knots, radians → degrees, decimal degrees → degrees and decimal minutes, 0–1 → %) and absent ones are omitted so the page never shows empty placeholders
 - Configurable NomadNet page banner: a new `banner` option lets you replace the vessel-name heading with multi-line micron/ASCII art
 - Configurable NomadNet page footer: a new `footer` option appends multi-line micron/ASCII text to the bottom of the index page (after the telemetry), useful for contact details or a static note

@@ -276,6 +276,43 @@ function buildPluginSchema(interfaces) {
         },
         additionalProperties: false,
       },
+      telemetry: {
+        type: "object",
+        title: "Telemetry broadcast",
+        description:
+          "Periodically broadcast a Sideband-compatible telemetry snapshot " +
+          "(position, speed and heading, house battery state of charge, plus " +
+          "depth, tide, wind, anchor watch and navigation state as custom " +
+          "sensors) to every configured crew member over LXMF. The snapshot is " +
+          "carried in the LXMF FIELD_TELEMETRY field, so Sideband, NomadNet and " +
+          "MeshChat render it in the peer telemetry view. The same Signal K " +
+          "keys the NomadNet index page serves are used, so both views stay " +
+          "consistent. Off by default.",
+        properties: {
+          enabled: {
+            type: "boolean",
+            title: "Broadcast telemetry to the crew",
+            description:
+              "When enabled, a telemetry snapshot is sent to each configured " +
+              "crew member shortly after start and then on the interval below. " +
+              "Requires messaging to come up and at least one crew member to be " +
+              "configured.",
+            default: false,
+          },
+          interval_seconds: {
+            type: "number",
+            title: "Broadcast interval (seconds)",
+            description:
+              "How often to re-broadcast the telemetry snapshot. Clamped to a " +
+              "30-second minimum to avoid flooding the mesh. Choose with the " +
+              "mesh bandwidth in mind — opportunistic LXMF delivery creates a " +
+              "packet per recipient per interval.",
+            default: 300,
+            minimum: 30,
+          },
+        },
+        additionalProperties: false,
+      },
     },
   };
 }

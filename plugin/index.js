@@ -14,11 +14,15 @@ const { buildPluginSchema } = require("./schema");
 const { resolveIdentity } = require("./identity");
 const { effectiveInterfaces, setupInterfaces } = require("./interfaces");
 const { sendNotification } = require("./notifications");
-const { setupMessaging, makeDeliverer } = require("./messaging");
+const { setupMessaging, makeDeliverer, makeTelemetryDeliverer } =
+  require("./messaging");
 const { setupNomadNet } = require("./nomadnet");
+const { readNumber, readPosition, readString } = require("./nomadnet");
 const compression = require("./compression");
 const { resolveDisplayName } = require("./displayname");
 const { createStorageAdapter, setupCrewPersistence } = require("./storage");
+const { effectiveCrew } = require("./notifications");
+const { buildTelemetrySensors, packTelemetry } = require("./telemetry");
 const commands = require("./commands");
 
 /**
@@ -54,6 +58,105 @@ function readSelf(app, path) {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Reads the boat's current telemetry from Signal K and builds a packed
+ * Sideband-compatible snapshot (`Telemeter.packed()` bytes), or `null` when no
+ * readings at all are available.
+ *
+ * Pulls the same Signal K keys the NomadNet index page serves (position, SOG,
+ * COG, house battery, depth, tide, wind, anchor watch, navigation state) so the
+ * telemetry broadcast and the browsed page stay consistent. Each raw value is
+ * unwrapped/converted to the units the telemetry packer expects.
+ *
+ * @param {{getSelfPath?: (path: string) => unknown}|undefined} app
+ * @returns {Uint8Array|null}
+ */
+function buildSnapshot(app) {
+  const position = readPosition(readSelf(app, "navigation.position"));
+  const speedMs = readNumber(readSelf(app, "navigation.speedOverGround"));
+  const bearingRad = readNumber(
+    readSelf(app, "navigation.courseOverGroundTrue"),
+  );
+  const altitudeM = readNumber(readSelf(app, "navigation.position.altitude"));
+  const batterySoc = readNumber(
+    readSelf(app, "electrical.batteries.house.capacity.stateOfCharge"),
+  );
+  const batteryCurrent = readNumber(
+    readSelf(app, "electrical.batteries.house.current"),
+  );
+  const depthM = readNumber(readSelf(app, "environment.depth.belowSurface"));
+  const tideHeightM = readNumber(readSelf(app, "environment.tide.heightNow"));
+  const tideState = readString(readSelf(app, "environment.tide.state"));
+  const windSpeedMs = readNumber(
+    readSelf(app, "environment.wind.speedOverGround"),
+  );
+  const windDirectionRad = readNumber(
+    readSelf(app, "environment.wind.directionTrue"),
+  );
+  const anchorDistanceM = readNumber(
+    readSelf(app, "navigation.anchor.distanceFromBow"),
+  );
+  const vesselState = readString(readSelf(app, "navigation.state"));
+
+  const readings = {
+    now: Math.floor(Date.now() / 1000),
+    latitude: position && position.latitude,
+    longitude: position && position.longitude,
+    altitudeM,
+    speedMs,
+    bearingRad,
+    batteryPercent:
+      batterySoc != null ? Math.round(batterySoc * 1000) / 10 : undefined,
+    batteryCharging: batteryCurrent != null ? batteryCurrent > 0 : undefined,
+    depthM,
+    tideHeightM,
+    tideState,
+    windSpeedMs,
+    windDirectionRad,
+    anchorDistanceM,
+    vesselState,
+  };
+
+  return packTelemetry(buildTelemetrySensors(readings), readings.now);
+}
+
+/**
+ * Builds a telemetry snapshot from the current Signal K state and sends it to
+ * every configured crew member via the LXMF telemetry deliverer. Returns the
+ * number of crew members it was sent to. Per-recipient failures are logged and
+ * do not abort the remaining recipients; nothing is sent when there is no
+ * telemetry to send or no crew is configured.
+ *
+ * @param {{debug?:(...args:any[])=>void, error?:(...args:any[])=>void, getSelfPath?:(path:string)=>unknown}|undefined} app
+ * @param {{crew?:unknown}|null|undefined} settings
+ * @param {(destinationHashHex:string, packedTelemetry:Uint8Array)=>Promise<void>} deliverTelemetry
+ * @returns {Promise<number>}
+ */
+async function sendTelemetryToCrew(app, settings, deliverTelemetry) {
+  const debug =
+    app && typeof app.debug === "function" ? (msg) => app.debug(msg) : () => {};
+  const error =
+    app && typeof app.error === "function" ? (msg) => app.error(msg) : () => {};
+  if (!deliverTelemetry) {
+    return 0;
+  }
+  const packed = buildSnapshot(app);
+  if (!packed) {
+    return 0;
+  }
+  const crew = effectiveCrew(settings && settings.crew, debug);
+  let sent = 0;
+  for (const member of crew) {
+    try {
+      await deliverTelemetry(member.destinationHash, packed);
+      sent += 1;
+    } catch (e) {
+      error(`Failed to send telemetry to ${member.name}: ${e.message}`);
+    }
+  }
+  return sent;
 }
 
 module.exports = (app) => {
@@ -229,6 +332,8 @@ module.exports = (app) => {
         // here is non-fatal: the node stays up for connectivity, just without
         // messaging (deliver stays undefined and alerts are skipped).
         let deliver;
+        /** Telemetry delivery callback (set when messaging comes up). */
+        let deliverTelemetry;
         try {
           const displayName = resolveDisplayName({
             configured:
@@ -250,6 +355,10 @@ module.exports = (app) => {
             app.debug,
           );
           deliver = makeDeliverer(plugin.lxmf, plugin.identity);
+          deliverTelemetry = makeTelemetryDeliverer(
+            plugin.lxmf,
+            plugin.identity,
+          );
 
           // Handle incoming LXMF messages (ping/pong, and future commands)
           // from any peer on the mesh.
@@ -277,6 +386,32 @@ module.exports = (app) => {
           });
         } catch (e) {
           app.debug(`Messaging setup error: ${e.message}`);
+        }
+
+        // Optionally broadcast a Sideband-compatible telemetry snapshot
+        // (position, battery, depth/tide/wind/anchor as custom sensors) to every
+        // configured crew member on a fixed interval. Opt-in: nothing is sent
+        // unless enabled. Skipped silently when messaging did not come up.
+        if (
+          deliverTelemetry &&
+          config &&
+          config.telemetry &&
+          config.telemetry.enabled
+        ) {
+          const intervalMs =
+            Math.max(30, Number(config.telemetry.interval_seconds) || 0) * 1000;
+          const sendOnce = () =>
+            sendTelemetryToCrew(app, config, deliverTelemetry).catch((e) =>
+              app.debug(`Telemetry broadcast error: ${e.message}`),
+            );
+          // Send one snapshot shortly after start so crew see the boat
+          // without waiting a full interval, then on the recurring timer.
+          const initial = setTimeout(sendOnce, 5000);
+          const timer = setInterval(sendOnce, intervalMs);
+          unsubscribes.push(() => {
+            clearTimeout(initial);
+            clearInterval(timer);
+          });
         }
 
         // Optionally bring up a NomadNet site so the boat can serve pages on
@@ -442,3 +577,7 @@ module.exports = (app) => {
 
 // Exposed for tests to override Reticulum/registry without network I/O.
 module.exports.deps = deps;
+// Exposed for tests so the telemetry snapshot/broadcast can be exercised
+// without bringing up the full Reticulum stack.
+module.exports.buildSnapshot = buildSnapshot;
+module.exports.sendTelemetryToCrew = sendTelemetryToCrew;

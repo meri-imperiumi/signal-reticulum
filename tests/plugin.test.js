@@ -325,6 +325,7 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
     "messaging",
     "crew",
     "nomadnet",
+    "telemetry",
   ]);
   const identity = schema.properties.identity;
   assert.ok("publicKey" in identity.properties);
@@ -714,6 +715,134 @@ test("stop tears down messaging and the notification subscription", async () => 
 
   assert.equal(plugin.lxmf, undefined);
   assert.equal(app.subscriptionmanager.unsubscribed, true);
+});
+
+// --- Telemetry broadcast (opt-in) ----------------------------------------
+
+test("schema exposes an opt-in telemetry broadcast configuration group", () => {
+  const group = makePlugin(makeApp()).schema().properties.telemetry;
+  assert.equal(group.properties.enabled.default, false);
+  assert.equal(group.properties.interval_seconds.default, 300);
+  assert.equal(group.properties.interval_seconds.minimum, 30);
+});
+
+test("start does not schedule telemetry when the option is disabled", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  const scheduled = [];
+  const origSetTimeout = globalThis.setTimeout;
+  const origSetInterval = globalThis.setInterval;
+  globalThis.setTimeout = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  globalThis.setInterval = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  try {
+    await plugin.start({
+      messaging: { display_name: "Boat" },
+      crew: [
+        { name: "Alice", destination: "0123456789abcdef0123456789abcdef" },
+      ],
+    });
+    assert.equal(scheduled.length, 0, "no telemetry timer scheduled");
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+    globalThis.setInterval = origSetInterval;
+    await plugin.stop();
+  }
+});
+
+test("start schedules and fires a telemetry broadcast to the crew when enabled", async () => {
+  const app = makeApp();
+  app.getSelfPath = (p) =>
+    p === "navigation.position" ? { latitude: 1, longitude: 2 } : undefined;
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+
+  // Capture the scheduled timers without firing them, so the test stays
+  // deterministic (no real 5 s / interval waits).
+  const scheduled = [];
+  const origSetTimeout = globalThis.setTimeout;
+  const origSetInterval = globalThis.setInterval;
+  globalThis.setTimeout = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  globalThis.setInterval = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  try {
+    await plugin.start({
+      messaging: { display_name: "Boat" },
+      telemetry: { enabled: true, interval_seconds: 30 },
+      crew: [{ name: "Alice", destination: dest }],
+    });
+
+    const router = plugin.lxmf;
+    assert.equal(router.sent.length, 0, "nothing sent before the timer fires");
+    assert.ok(scheduled.length >= 1, "a telemetry timer was scheduled");
+
+    // Fire the captured telemetry callback (the initial send).
+    await scheduled[0]();
+
+    assert.equal(router.sent.length, 1, "one telemetry snapshot sent");
+    const fields = router.sent[0].message.options.fields;
+    assert.ok(fields instanceof Map, "telemetry carried in LXMF fields map");
+    const packed = fields.get(0x02);
+    assert.ok(
+      packed instanceof Uint8Array,
+      "FIELD_TELEMETRY holds packed bytes",
+    );
+    assert.deepEqual(
+      router.sent[0].message.options.destinationHash,
+      Buffer.from(dest, "hex"),
+    );
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+    globalThis.setInterval = origSetInterval;
+    await plugin.stop();
+  }
+});
+
+test("telemetry broadcasts stop when the plugin is stopped", async () => {
+  const app = makeApp();
+  app.getSelfPath = () => ({ latitude: 1, longitude: 2 });
+  const plugin = makePlugin(app);
+  let clearedTimeout = false;
+  let clearedInterval = false;
+  const origSetTimeout = globalThis.setTimeout;
+  const origSetInterval = globalThis.setInterval;
+  const origClearTimeout = globalThis.clearTimeout;
+  const origClearInterval = globalThis.clearInterval;
+  globalThis.setTimeout = (fn) => fn;
+  globalThis.setInterval = (fn) => fn;
+  globalThis.clearTimeout = () => {
+    clearedTimeout = true;
+  };
+  globalThis.clearInterval = () => {
+    clearedInterval = true;
+  };
+  try {
+    await plugin.start({
+      messaging: {},
+      telemetry: { enabled: true, interval_seconds: 30 },
+      crew: [
+        { name: "Alice", destination: "0123456789abcdef0123456789abcdef" },
+      ],
+    });
+    await plugin.stop();
+    assert.ok(clearedTimeout, "initial telemetry timer cleared on stop");
+    assert.ok(clearedInterval, "telemetry interval cleared on stop");
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+    globalThis.setInterval = origSetInterval;
+    globalThis.clearTimeout = origClearTimeout;
+    globalThis.clearInterval = origClearInterval;
+  }
 });
 
 // --- NomadNet site (opt-in) -----------------------------------------------

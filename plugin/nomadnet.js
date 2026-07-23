@@ -444,6 +444,7 @@ module.exports = {
   renderPage,
   readString,
   readNumber,
+  readPosition,
   formatVesselState,
   formatPosition,
   formatAnchorDistance,

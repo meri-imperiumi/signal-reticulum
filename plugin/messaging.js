@@ -21,6 +21,7 @@ const RNS = require("@reticulum/core");
 const deps = {
   LXMRouter: RNS.LXMRouter,
   LXMessage: RNS.LXMessage,
+  FIELD_TELEMETRY: RNS.LXMFConstants.FIELD_TELEMETRY,
   fromHex: RNS.fromHex,
   toHex: RNS.toHex,
 };
@@ -102,8 +103,40 @@ function makeDeliverer(lxmf, identity) {
   };
 }
 
+/**
+ * Builds a `deliverTelemetry(destinationHashHex, packedTelemetry)` callback
+ * bound to the given router and sender identity. Each call constructs and sends
+ * a single LXMF message carrying the Sideband telemetry snapshot in its
+ * `FIELD_TELEMETRY` field (with empty title/content), so any LXMF client that
+ * understands telemetry — Sideband, NomadNet, MeshChat — renders it in the
+ * peer's telemetry view.
+ *
+ * The `fields` map uses an integer key (via `Map`) so it is serialised with an
+ * integer field id on the wire, exactly as Sideband expects.
+ *
+ * Rejects if the recipient's identity is unknown or delivery fails; the caller
+ * logs and continues with the next recipient.
+ *
+ * @param {object} lxmf - An initialised LXMRouter.
+ * @param {object} identity - The sender Reticulum identity.
+ * @returns {(destinationHashHex:string, packedTelemetry:Uint8Array)=>Promise<void>}
+ */
+function makeTelemetryDeliverer(lxmf, identity) {
+  return async function deliverTelemetry(destinationHashHex, packedTelemetry) {
+    const message = new deps.LXMessage({
+      sourceHash: lxmf.deliveryDest.destinationHash,
+      destinationHash: deps.fromHex(destinationHashHex),
+      title: "",
+      content: "",
+      fields: new Map([[deps.FIELD_TELEMETRY, packedTelemetry]]),
+    });
+    await lxmf.send(message, identity);
+  };
+}
+
 module.exports = {
   deps,
   setupMessaging,
   makeDeliverer,
+  makeTelemetryDeliverer,
 };
