@@ -228,6 +228,45 @@ test("renderPage combines a banner with the telemetry section", () => {
   assert.equal(page, "B\n\n>Vessel status\nVessel is sailing\n");
 });
 
+// --- footer rendering ------------------------------------------------------
+
+test("renderPage appends a configured footer at the bottom", () => {
+  const page = renderPage({ vesselName: "Boat", footer: "73" });
+  assert.equal(page, ">>Boat\n\n73\n");
+});
+
+test("renderPage renders a multi-line footer as-is", () => {
+  const page = renderPage({
+    vesselName: "Boat",
+    footer: "Call sign: OH7B\nMMSI: 230000000",
+  });
+  assert.equal(page, ">>Boat\n\nCall sign: OH7B\nMMSI: 230000000\n");
+});
+
+test("renderPage trims surrounding whitespace from the footer", () => {
+  const page = renderPage({ vesselName: "Boat", footer: "  73  \n" });
+  assert.equal(page, ">>Boat\n\n73\n");
+});
+
+test("renderPage omits the footer when it is empty or whitespace", () => {
+  assert.equal(renderPage({ vesselName: "Boat", footer: "" }), ">>Boat\n");
+  assert.equal(renderPage({ vesselName: "Boat", footer: "   " }), ">>Boat\n");
+});
+
+test("renderPage appends the footer after the telemetry section", () => {
+  const page = renderPage({
+    banner: "B",
+    telemetry: { state: "sailing" },
+    footer: "73",
+  });
+  assert.equal(page, "B\n\n>Vessel status\nVessel is sailing\n\n73\n");
+});
+
+test("renderPage combines a banner and a footer with no telemetry", () => {
+  const page = renderPage({ banner: "B", footer: "F" });
+  assert.equal(page, "B\n\nF\n");
+});
+
 test("renderPage appends a Vessel status section when telemetry is available", () => {
   const page = renderPage({
     vesselName: "S/Y Bergie",

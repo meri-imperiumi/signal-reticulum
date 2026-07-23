@@ -237,12 +237,26 @@ function buildPluginSchema(interfaces) {
           banner: {
             type: "string",
             title: "Page banner",
+            format: "textarea",
             description:
               "Optional ASCII/micron banner shown at the top of the index " +
               "page instead of the vessel name. Multi-line ASCII art is " +
               "rendered as-is; lines that begin with micron directives (!, >, " +
               "-, etc.) are interpreted by the client, so prefer art that " +
               "does not. Leave empty to show the vessel name as a heading.",
+            default: "",
+          },
+          footer: {
+            type: "string",
+            title: "Page footer",
+            format: "textarea",
+            description:
+              "Optional ASCII/micron text shown at the bottom of the index " +
+              "page, after the telemetry. Useful for contact details, a " +
+              "MMSI/callsign reminder or a static note. Multi-line content is " +
+              "rendered as-is; lines that begin with micron directives (!, >, " +
+              "-, etc.) are interpreted by the client. Leave empty for no " +
+              "footer.",
             default: "",
           },
         },

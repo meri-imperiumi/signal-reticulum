@@ -246,13 +246,15 @@ function formatBattery(stateOfCharge, current) {
  * line beginning with `>` is a NomadNet section header). When any telemetry is
  * available a ">Vessel status" section is appended with one plain line per
  * reading (state, position, anchor, depth, tide, wind, battery); absent
- * readings are omitted so the page never shows empty placeholders.
+ * readings are omitted so the page never shows empty placeholders. When a
+ * footer is configured it is appended last, separated by a blank line.
  *
  * The context is evaluated per-request so live values stay current.
  *
  * @param {object} [context]
  * @param {unknown} [context.vesselName] - Value at `vessels.self.name`.
  * @param {unknown} [context.banner] - Optional multi-line ASCII/micron banner.
+ * @param {unknown} [context.footer] - Optional multi-line ASCII/micron footer.
  * @param {object} [context.telemetry] - Raw Signal K self-path values. The
  *   `position` key takes the `navigation.position` object
  *   (`{latitude, longitude}`, optionally `{value}` wrapped).
@@ -281,6 +283,12 @@ function renderPage(context = {}) {
     lines.push("");
     lines.push(TELEMETRY_SECTION);
     lines.push(...body);
+  }
+
+  const footer = readString(cfg.footer);
+  if (footer) {
+    lines.push("");
+    lines.push(footer);
   }
 
   return `${lines.join("\n")}\n`;

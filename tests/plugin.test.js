@@ -726,6 +726,10 @@ test("schema exposes an opt-in NomadNet configuration group", () => {
   assert.equal(group.properties.display_name.default, "");
   assert.equal(group.properties.banner.default, "");
   assert.equal(group.properties.banner.type, "string");
+  assert.equal(group.properties.banner.format, "textarea");
+  assert.equal(group.properties.footer.default, "");
+  assert.equal(group.properties.footer.type, "string");
+  assert.equal(group.properties.footer.format, "textarea");
 });
 
 test("start does not bring up the NomadNet site when disabled", async () => {
@@ -833,6 +837,27 @@ test("the served index page uses the configured banner when set", async () => {
   const text = Buffer.from(page).toString("utf8");
   assert.ok(text.startsWith("/|__\n\\__/"), "banner shown at the top");
   assert.doesNotMatch(text, /S\/Y Bergie/);
+});
+
+test("the served index page appends the configured footer", async () => {
+  const app = makeApp();
+  app.getSelfPath = (path) =>
+    path === "name" ? { value: "S/Y Bergie" } : undefined;
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+
+  await plugin.start({
+    nomadnet: { enabled: true, footer: "73 de OH7B" },
+  });
+
+  const dest = FakeNomadDestination.instances[0];
+  const page = await dest.registered[0].options.responseGenerator();
+  const text = Buffer.from(page).toString("utf8");
+  assert.equal(
+    text,
+    ">>S/Y Bergie\n\n73 de OH7B\n",
+    "footer shown at the bottom",
+  );
 });
 
 test("stop deregisters the NomadNet site", async () => {

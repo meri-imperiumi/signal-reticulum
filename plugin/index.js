@@ -289,6 +289,7 @@ module.exports = (app) => {
                 getContext: () => ({
                   vesselName: readSelf(app, "name"),
                   banner: config.nomadnet && config.nomadnet.banner,
+                  footer: config.nomadnet && config.nomadnet.footer,
                   telemetry: {
                     state: readSelf(app, "navigation.state"),
                     position: readSelf(app, "navigation.position"),
