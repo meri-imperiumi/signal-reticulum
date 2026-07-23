@@ -15,6 +15,7 @@ const { resolveIdentity } = require("./identity");
 const { effectiveInterfaces, setupInterfaces } = require("./interfaces");
 const { sendNotification } = require("./notifications");
 const { setupMessaging, makeDeliverer } = require("./messaging");
+const { setupNomadNet } = require("./nomadnet");
 const { resolveDisplayName } = require("./displayname");
 const { createStorageAdapter, setupCrewPersistence } = require("./storage");
 const commands = require("./commands");
@@ -77,6 +78,11 @@ module.exports = (app) => {
      * handling can be added later by attaching to its `"message"` events.
      */
     lxmf: undefined,
+    /**
+     * The NomadNet site handle (available after start when enabled). Exposed so
+     * later steps can extend the served page with live telemetry.
+     */
+    nomadnet: undefined,
 
     /**
      * Resolves (or generates) the identity, brings up the Reticulum node and
@@ -90,6 +96,7 @@ module.exports = (app) => {
       plugin.rns = undefined;
       plugin.interfaces = [];
       plugin.lxmf = undefined;
+      plugin.nomadnet = undefined;
 
       let resolved;
       try {
@@ -229,6 +236,39 @@ module.exports = (app) => {
           app.debug(`Messaging setup error: ${e.message}`);
         }
 
+        // Optionally bring up a NomadNet site so the boat can serve pages on
+        // the mesh. Opt-in: nothing is announced or served unless enabled.
+        if (config && config.nomadnet && config.nomadnet.enabled) {
+          try {
+            const nodeDisplayName = resolveDisplayName({
+              configured: config.nomadnet && config.nomadnet.display_name,
+              vesselName: readSelf(app, "name"),
+              callsign: readSelf(app, "communication.callsignVhf"),
+            });
+            const site = await setupNomadNet(
+              rns,
+              plugin.identity,
+              {
+                displayName: nodeDisplayName,
+                getContext: () => ({
+                  vesselName: readSelf(app, "name"),
+                }),
+              },
+              app.debug,
+            );
+            plugin.nomadnet = site;
+            unsubscribes.push(() => {
+              try {
+                site.stop();
+              } catch {
+                /* best effort */
+              }
+            });
+          } catch (e) {
+            app.debug(`NomadNet setup error: ${e.message}`);
+          }
+        }
+
         // Subscribe to Signal K notifications so alarm/emergency states are
         // forwarded to the crew over LXMF.
         if (app.subscriptionmanager) {
@@ -316,6 +356,7 @@ module.exports = (app) => {
         app.debug(`Teardown error: ${e.message}`);
       }
       plugin.lxmf = undefined;
+      plugin.nomadnet = undefined;
       plugin.identity = undefined;
       plugin.rns = undefined;
       plugin.interfaces = [];

@@ -1,6 +1,7 @@
 # Changelog
 ## [Unreleased]
 ### Added
+- Optional NomadNet site: when the new `nomadnet` config group is enabled, the node announces a `nomadnetwork.node` destination and serves a `/page/index.mu` page (currently just the vessel name) that NomadNet clients (Sideband, NomadNet, MeshChat) can browse. The page content is evaluated per-request so live telemetry can be added in later steps. Off by default
 - Filesystem-backed persistence: a `FileStorageAdapter` (from `@reticulum/node`) rooted under `app.getDataDirPath()` is wired into the Reticulum node so learned peer identities, ratchet rings and path entries survive restarts. Persistence degrades gracefully to in-memory only on servers that expose no data directory
 - Crew member identities are now persisted pre-emptively: the moment an announce from a configured crew member's `lxmf.delivery` destination is heard, their identity/ratchet/path data is stored through the node's persistor — before any message is exchanged — so a restart can still reach them immediately
 

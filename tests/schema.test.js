@@ -43,6 +43,7 @@ test("buildPluginSchema returns a draft-07 object schema with the interfaces gro
     "identity",
     "messaging",
     "crew",
+    "nomadnet",
   ]);
   assert.equal(schema.properties.interfaces.type, "array");
   assert.equal(schema.properties.interfaces.items.oneOf.length, 0);

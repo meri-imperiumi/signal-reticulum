@@ -188,6 +188,35 @@ function buildPluginSchema(interfaces) {
           additionalProperties: false,
         },
       },
+      nomadnet: {
+        type: "object",
+        title: "NomadNet site",
+        description:
+          "NomadNet mesh site. When enabled, the node announces a " +
+          "nomadnetwork.node destination and serves a /page/index.mu page " +
+          "that NomadNet clients (Sideband, NomadNet, MeshChat) can browse " +
+          "to see the boat's status.",
+        properties: {
+          enabled: {
+            type: "boolean",
+            title: "Serve a NomadNet site",
+            description:
+              "Announce a NomadNet node destination and serve its index " +
+              "page over the mesh. Off by default.",
+            default: false,
+          },
+          display_name: {
+            type: "string",
+            title: "NomadNet node name",
+            description:
+              "Name announced to the mesh for this node's " +
+              "nomadnetwork.node destination. Defaults to the vessel name " +
+              "(with callsign) when left empty.",
+            default: "",
+          },
+        },
+        additionalProperties: false,
+      },
     },
   };
 }

@@ -7,6 +7,7 @@ const { Identity, toHex } = require("@reticulum/core");
 const { listInterfaces, FileStorageAdapter } = require("@reticulum/node");
 const makePlugin = require("../plugin/index.js");
 const messaging = require("../plugin/messaging");
+const nomadnet = require("../plugin/nomadnet");
 
 // --- Fakes so the plugin can be started without any real network I/O --------
 
@@ -34,6 +35,16 @@ class FakeRns {
     this.added = [];
     this.removed = [];
     this.transport = new EventTarget();
+    this.transport.bound = [];
+    this.transport.unbound = [];
+    this.transport.bindLocalDestination = (dest) => {
+      this.transport.bound.push(dest);
+    };
+    this.transport.unbindLocalDestination = (dest) => {
+      this.transport.unbound.push(dest);
+    };
+    this.registeredDestinations = [];
+    this.deregisteredDestinations = [];
     this.persistor = {
       storeCalls: [],
       flushCalls: 0,
@@ -51,6 +62,12 @@ class FakeRns {
   }
   removeInterface(iface) {
     this.removed.push(iface);
+  }
+  registerDestination(dest) {
+    this.registeredDestinations.push(dest);
+  }
+  deregisterDestination(dest) {
+    this.deregisteredDestinations.push(dest);
   }
   // Mirrors the real Reticulum.stop(): disconnects every attached interface
   // and flushes the persistence layer.
@@ -128,6 +145,43 @@ messaging.deps.LXMRouter = FakeLxmRouter;
 messaging.deps.LXMessage = FakeLXMessage;
 messaging.deps.fromHex = (hex) => Buffer.from(hex, "hex");
 messaging.deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
+
+// --- Fakes so the plugin's NomadNet site can be exercised without RNS I/O ---
+
+class FakeNomadDestination {
+  constructor(name, direction, type, identity, rns) {
+    this.name = name;
+    this.type = type;
+    this.identity = identity;
+    this.rns = rns;
+    this.destinationHash = new Uint8Array(16).fill(13);
+    this.appData = null;
+    this.registered = [];
+    this.removed = [];
+    this.announceCalls = 0;
+    FakeNomadDestination.instances.push(this);
+  }
+  static async IN(name, type, identity, rns) {
+    return new this(name, "IN", type, identity, rns);
+  }
+  async registerRequestHandler(path, options) {
+    this.registered.push({ path, options });
+    return new Uint8Array(16);
+  }
+  async removeRequestHandler(path) {
+    this.removed.push(path);
+    return true;
+  }
+  async announce() {
+    this.announceCalls += 1;
+  }
+}
+FakeNomadDestination.instances = [];
+
+nomadnet.deps.Destination = FakeNomadDestination;
+nomadnet.deps.DestType = { SINGLE: "single" };
+nomadnet.deps.Allow = { ALL: 0x01 };
+nomadnet.deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
 
 /** Minimal stand-in for the Signal K ServerAPI the plugin touches. */
 function makeApp() {
@@ -231,6 +285,7 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
     "identity",
     "messaging",
     "crew",
+    "nomadnet",
   ]);
   const identity = schema.properties.identity;
   assert.ok("publicKey" in identity.properties);
@@ -544,6 +599,91 @@ test("stop tears down messaging and the notification subscription", async () => 
 
   assert.equal(plugin.lxmf, undefined);
   assert.equal(app.subscriptionmanager.unsubscribed, true);
+});
+
+// --- NomadNet site (opt-in) -----------------------------------------------
+
+test("schema exposes an opt-in NomadNet configuration group", () => {
+  const plugin = makePlugin(makeApp());
+  const group = plugin.schema().properties.nomadnet;
+
+  assert.equal(group.properties.enabled.default, false);
+  assert.equal(group.properties.display_name.default, "");
+});
+
+test("start does not bring up the NomadNet site when disabled", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+
+  await plugin.start({});
+
+  assert.equal(plugin.nomadnet, undefined);
+  assert.equal(
+    FakeNomadDestination.instances.length,
+    0,
+    "no destination created",
+  );
+});
+
+test("start brings up the NomadNet site, announces and serves the index page", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+
+  await plugin.start({ nomadnet: { enabled: true } });
+
+  assert.ok(plugin.nomadnet, "site handle exposed");
+  assert.equal(
+    FakeNomadDestination.instances.length,
+    1,
+    "one node destination",
+  );
+  const dest = FakeNomadDestination.instances[0];
+  assert.equal(dest.name, "nomadnetwork.node");
+  assert.deepEqual(
+    plugin.rns.registeredDestinations,
+    [dest],
+    "destination registered with the node",
+  );
+  assert.deepEqual(
+    dest.registered.map((r) => r.path),
+    ["/page/index.mu"],
+  );
+  assert.equal(dest.announceCalls, 1, "node announced");
+});
+
+test("the served index page shows the vessel name", async () => {
+  const app = makeApp();
+  app.getSelfPath = (path) =>
+    path === "name" ? { value: "S/Y Bergie" } : undefined;
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+
+  await plugin.start({ nomadnet: { enabled: true } });
+
+  const dest = FakeNomadDestination.instances[0];
+  const page = await dest.registered[0].options.responseGenerator();
+  assert.deepEqual(Buffer.from(page).toString("utf8"), ">>S/Y Bergie\n");
+});
+
+test("stop deregisters the NomadNet site", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+  await plugin.start({ nomadnet: { enabled: true } });
+  const dest = FakeNomadDestination.instances[0];
+  const rns = plugin.rns;
+
+  await plugin.stop();
+
+  assert.deepEqual(dest.removed, ["/page/index.mu"], "page handler removed");
+  assert.deepEqual(
+    rns.deregisteredDestinations,
+    [dest],
+    "destination deregistered",
+  );
+  assert.equal(plugin.nomadnet, undefined);
 });
 
 test("start uses a shared Reticulum instance when one is available", async () => {
