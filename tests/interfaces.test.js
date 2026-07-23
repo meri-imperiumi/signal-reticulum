@@ -7,7 +7,6 @@ const {
   effectiveInterfaces,
   optionsFromEntry,
   setupInterfaces,
-  teardownInterfaces,
 } = require("../plugin/interfaces");
 
 /** A fake interface class that records its lifecycle for assertions. */
@@ -141,45 +140,4 @@ test("setupInterfaces records a connect failure, attempts cleanup, and keeps goi
   assert.match(result.errors[0].error, /Failed to connect "tcp-client"/);
   // The failed interface was cleaned up via disconnect.
   assert.equal(bad.disconnectedByCleanup, undefined); // sanity
-});
-
-test("teardownInterfaces disconnects and removes every interface in reverse order", async () => {
-  const rns = makeFakeRns();
-  const one = makeFakeInterfaceClass("one");
-  const two = makeFakeInterfaceClass("two");
-  const first = new one({});
-  const second = new two({});
-  const connected = [first, second];
-
-  await teardownInterfaces(rns, connected);
-
-  // Removed in reverse connection order.
-  assert.deepEqual(rns.removed, [second, first]);
-  assert.equal(first.disconnectedCalls, 1);
-  assert.equal(second.disconnectedCalls, 1);
-});
-
-test("teardownInterfaces keeps going when an interface throws on disconnect", async () => {
-  const rns = makeFakeRns();
-  const exploding = {
-    name: "boom",
-    async disconnect() {
-      throw new Error("boom");
-    },
-  };
-  const calm = {
-    name: "calm",
-    disconnectCalls: 0,
-    async disconnect() {
-      this.disconnectCalls += 1;
-    },
-  };
-  const messages = [];
-  const log = (...args) => messages.push(args.join(" "));
-
-  await teardownInterfaces(rns, [exploding, calm], log);
-
-  assert.equal(calm.disconnectCalls, 1);
-  assert.equal(rns.removed.length, 2);
-  assert.ok(messages.some((m) => /disconnecting interface boom/.test(m)));
 });

@@ -117,39 +117,10 @@ async function setupInterfaces(
   return { connected, errors };
 }
 
-/**
- * Disconnects and detaches every interface, in reverse connection order. Never
- * throws; per-interface failures are logged.
- *
- * @param {{removeInterface(iface: object): void}} rns
- * @param {object[]} interfaces
- * @param {(...args: any[]) => void} [log]
- * @returns {Promise<void>}
- */
-async function teardownInterfaces(rns, interfaces, log = () => {}) {
-  const list = [...interfaces].reverse();
-  for (const iface of list) {
-    const name = iface && iface.name;
-    try {
-      if (iface && typeof iface.disconnect === "function") {
-        await iface.disconnect();
-      }
-    } catch (e) {
-      log(`Error disconnecting interface ${name}: ${e.message}`);
-    }
-    try {
-      rns.removeInterface(iface);
-    } catch (e) {
-      log(`Error removing interface ${name}: ${e.message}`);
-    }
-  }
-}
-
 module.exports = {
   DEFAULT_INTERFACES,
   getDefaultInterfaces,
   effectiveInterfaces,
   optionsFromEntry,
   setupInterfaces,
-  teardownInterfaces,
 };

@@ -1,8 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { join } = require("node:path");
+const os = require("node:os");
 
 const { Identity, toHex } = require("@reticulum/core");
-const { listInterfaces } = require("@reticulum/node");
+const { listInterfaces, FileStorageAdapter } = require("@reticulum/node");
 const makePlugin = require("../plugin/index.js");
 const messaging = require("../plugin/messaging");
 
@@ -31,12 +33,40 @@ class FakeRns {
     this.config = config;
     this.added = [];
     this.removed = [];
+    this.transport = new EventTarget();
+    this.persistor = {
+      storeCalls: [],
+      flushCalls: 0,
+      async store(hash, opts) {
+        this.storeCalls.push({ hash, opts });
+      },
+      async flush() {
+        this.flushCalls += 1;
+      },
+    };
+    this.stopped = false;
   }
   addInterface(iface, isDefault) {
     this.added.push({ iface, isDefault });
   }
   removeInterface(iface) {
     this.removed.push(iface);
+  }
+  // Mirrors the real Reticulum.stop(): disconnects every attached interface
+  // and flushes the persistence layer.
+  async stop() {
+    this.stopped = true;
+    for (const entry of this.added) {
+      const iface = entry.iface;
+      if (iface && typeof iface.disconnect === "function") {
+        try {
+          await iface.disconnect();
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+    await this.persistor.flush();
   }
 }
 
@@ -132,6 +162,14 @@ function makeApp() {
       },
     },
   };
+  return app;
+}
+
+/** Like {@link makeApp} but also exposes a writable plugin data directory. */
+function makeAppWithDataDir() {
+  const app = makeApp();
+  app.getDataDirPath = () =>
+    join(os.tmpdir(), `sk-reticulum-${process.pid}-${Date.now()}`);
   return app;
 }
 
@@ -302,10 +340,10 @@ test("stop tears down every connected interface and clears state", async () => {
 
   await plugin.stop();
 
-  assert.equal(
-    rns.removed.length,
-    ifaces.length,
-    "all interfaces removed from node",
+  assert.equal(rns.stopped, true, "node torn down via rns.stop()");
+  assert.ok(
+    ifaces.every((i) => i.connected === false),
+    "all interfaces disconnected",
   );
   assert.equal(plugin.rns, undefined);
   assert.equal(plugin.identity, undefined);
@@ -555,4 +593,109 @@ test("start does not attempt the shared instance when use_shared_instance is fal
   } finally {
     sharedState.available = false;
   }
+});
+
+// --- Filesystem storage adapter & crew persistence --------------------------
+
+test("start wires a filesystem storage adapter into the Reticulum node when a data dir is available", async () => {
+  const app = makeAppWithDataDir();
+  const plugin = makePlugin(app);
+  await plugin.start({});
+
+  const adapter = plugin.rns.config.storageAdapter;
+  assert.ok(
+    adapter instanceof FileStorageAdapter,
+    "FileStorageAdapter wired in",
+  );
+  assert.equal(adapter.directory, app.getDataDirPath());
+  assert.ok(
+    app.debugCalls.some((args) =>
+      /Persisting Reticulum data/.test(args.join(" ")),
+    ),
+  );
+});
+
+test("persistence is disabled when the server exposes no data directory", async () => {
+  const app = makeApp(); // no getDataDirPath
+  const plugin = makePlugin(app);
+  await plugin.start({});
+
+  assert.equal(plugin.rns.config.storageAdapter, null);
+  assert.ok(
+    app.debugCalls.some((args) => /persistence disabled/i.test(args.join(" "))),
+  );
+});
+
+test("an announce from a configured crew member is persisted pre-emptively", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+  await plugin.start({ crew: [{ name: "Alice", destination: dest }] });
+  const rns = plugin.rns;
+
+  rns.transport.dispatchEvent(
+    new CustomEvent("announce", {
+      detail: {
+        destinationHash: Buffer.from(dest, "hex"),
+        identity: { publicKey: new Uint8Array() },
+      },
+    }),
+  );
+  // The persistor call is async; let it flush.
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(rns.persistor.storeCalls.length, 1);
+  const call = rns.persistor.storeCalls[0];
+  assert.deepEqual(call.hash, Buffer.from(dest, "hex"));
+  assert.ok(call.opts.announce, "announce detail forwarded to the persistor");
+});
+
+test("announces from non-crew destinations are not persisted", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  await plugin.start({
+    crew: [{ name: "Alice", destination: "0123456789abcdef0123456789abcdef" }],
+  });
+  const rns = plugin.rns;
+
+  rns.transport.dispatchEvent(
+    new CustomEvent("announce", {
+      detail: {
+        destinationHash: Buffer.from("fedcba9876543210fedcba9876543210", "hex"),
+        identity: { publicKey: new Uint8Array() },
+      },
+    }),
+  );
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(rns.persistor.storeCalls.length, 0);
+});
+
+test("crew persistence stops after the plugin is stopped", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+  await plugin.start({ crew: [{ name: "Alice", destination: dest }] });
+  const rns = plugin.rns;
+
+  await plugin.stop();
+
+  rns.transport.dispatchEvent(
+    new CustomEvent("announce", {
+      detail: { destinationHash: Buffer.from(dest, "hex"), identity: {} },
+    }),
+  );
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(rns.persistor.storeCalls.length, 0, "listener removed on stop");
+});
+
+test("stop flushes the persistence layer", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  await plugin.start({});
+  const rns = plugin.rns;
+  assert.equal(rns.persistor.flushCalls, 0);
+
+  await plugin.stop();
+
+  assert.equal(rns.persistor.flushCalls, 1);
 });

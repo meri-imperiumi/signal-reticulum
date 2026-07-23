@@ -1,6 +1,11 @@
 # Changelog
 ## [Unreleased]
+### Added
+- Filesystem-backed persistence: a `FileStorageAdapter` (from `@reticulum/node`) rooted under `app.getDataDirPath()` is wired into the Reticulum node so learned peer identities, ratchet rings and path entries survive restarts. Persistence degrades gracefully to in-memory only on servers that expose no data directory
+- Crew member identities are now persisted pre-emptively: the moment an announce from a configured crew member's `lxmf.delivery` destination is heard, their identity/ratchet/path data is stored through the node's persistor — before any message is exchanged — so a restart can still reach them immediately
+
 ### Changed
+- Teardown now calls `Reticulum.stop()` (which disconnects interfaces and flushes the persistence layer) instead of the plugin's own interface-teardown code; the redundant `teardownInterfaces` helper has been removed
 - Switched from the monolithic `reticulum-js` package to the split `@reticulum/core` (protocol stack, identity, LXMF, utilities) and `@reticulum/node` (Node.js interfaces and the interface registry) packages
 - Shared-instance connection now uses `LocalClientInterface.connectToSharedInstance` from `@reticulum/node` directly (the node no longer exposes it), and the plugin attaches the returned interface to the transport itself
 

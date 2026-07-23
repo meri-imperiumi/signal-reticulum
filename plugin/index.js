@@ -12,14 +12,11 @@ const {
 } = require("@reticulum/node");
 const { buildPluginSchema } = require("./schema");
 const { resolveIdentity } = require("./identity");
-const {
-  effectiveInterfaces,
-  setupInterfaces,
-  teardownInterfaces,
-} = require("./interfaces");
+const { effectiveInterfaces, setupInterfaces } = require("./interfaces");
 const { sendNotification } = require("./notifications");
 const { setupMessaging, makeDeliverer } = require("./messaging");
 const { resolveDisplayName } = require("./displayname");
+const { createStorageAdapter, setupCrewPersistence } = require("./storage");
 const commands = require("./commands");
 
 /**
@@ -32,6 +29,8 @@ const deps = {
   Reticulum,
   getInterface,
   connectSharedInstance: LocalClientInterface.connectToSharedInstance,
+  createStorageAdapter,
+  setupCrewPersistence,
 };
 
 /**
@@ -123,9 +122,21 @@ module.exports = (app) => {
       }
 
       try {
-        const rns = new deps.Reticulum({});
+        const storageAdapter = deps.createStorageAdapter(
+          typeof app.getDataDirPath === "function"
+            ? app.getDataDirPath()
+            : null,
+          app.debug,
+        );
+        const rns = new deps.Reticulum({ storageAdapter });
         plugin.rns = rns;
         app.debug(`Loaded Reticulum identity ${hashHex}`);
+
+        // Pre-emptively persist crew member identities the moment their
+        // announces are heard, so a restart can still reach them.
+        unsubscribes.push(
+          deps.setupCrewPersistence(rns, config && config.crew, app.debug),
+        );
 
         // Optionally reuse a locally running shared Reticulum instance (rnsd)
         // and its mesh interfaces. Enabled by default: when no shared instance
@@ -295,10 +306,11 @@ module.exports = (app) => {
       });
       episodes.clear();
       const rns = plugin.rns;
-      const interfaces = plugin.interfaces || [];
       try {
-        if (rns) {
-          await teardownInterfaces(rns, interfaces, app.debug);
+        // Reticulum.stop() disconnects every attached interface and flushes
+        // the persistence layer, so the final debounced batch isn't lost.
+        if (rns && typeof rns.stop === "function") {
+          await rns.stop();
         }
       } catch (e) {
         app.debug(`Teardown error: ${e.message}`);
