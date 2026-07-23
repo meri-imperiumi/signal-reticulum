@@ -346,11 +346,6 @@ module.exports = (app) => {
             plugin.identity,
             {
               displayName,
-              forwardSecrecy: !!(
-                config &&
-                config.messaging &&
-                config.messaging.forward_secrecy
-              ),
             },
             app.debug,
           );
@@ -364,6 +359,11 @@ module.exports = (app) => {
           // from any peer on the mesh.
           const onLxmfMessage = async (event) => {
             const message = event && event.detail && event.detail.message;
+            // The arrival Link id: replies sent over this established Link are
+            // prompt and reliable (the path the LXMF echobot uses), whereas an
+            // opportunistic reply needs a fresh path and the recipient identity
+            // known via announce. Undefined for opportunistic inbound packets.
+            const linkId = event && event.detail && event.detail.link;
             if (!message) {
               return;
             }
@@ -371,7 +371,13 @@ module.exports = (app) => {
               `Received LXMF message from ${toHex(message.sourceHash || [])}`,
             );
             try {
-              await commands.handleMessage(message, config, deliver, app);
+              await commands.handleMessage(
+                message,
+                config,
+                deliver,
+                app,
+                linkId,
+              );
             } catch (e) {
               app.debug(`LXMF message handling error: ${e.message}`);
             }

@@ -15,7 +15,7 @@ class FakeLxmRouter {
     this.deliveryDest = {
       destinationHash: new Uint8Array(16).fill(7),
       // init() enables forward-secrecy ratchets on the delivery destination;
-      // mirror that so the disable-by-default path is observable.
+      // mirror that so setupMessaging leaving them enabled is observable.
       ratchetsEnabled: true,
       ratchets: [
         {
@@ -31,8 +31,8 @@ class FakeLxmRouter {
   async announce(name) {
     this.announceCalls.push(name);
   }
-  async send(message, identity) {
-    this.sent.push({ message, identity });
+  async send(message, identity, linkId) {
+    this.sent.push({ message, identity, linkId });
   }
 }
 
@@ -92,7 +92,7 @@ test("setupMessaging skips announce when no display name is given", async () => 
   Object.assign(deps, REAL_DEPS);
 });
 
-test("setupMessaging disables forward-secrecy ratchets by default so the announce is visible to every client", async () => {
+test("setupMessaging keeps forward-secrecy ratchets enabled so ratchet-encrypted inbound messages decrypt", async () => {
   deps.LXMRouter = FakeLxmRouter;
   deps.toHex = () => "00";
 
@@ -100,36 +100,13 @@ test("setupMessaging disables forward-secrecy ratchets by default so the announc
 
   assert.equal(
     router.deliveryDest.ratchetsEnabled,
-    false,
-    "ratchets disabled on the delivery destination",
-  );
-  assert.equal(
-    router.deliveryDest.ratchets,
-    null,
-    "ratchet ring cleared on the delivery destination",
-  );
-
-  Object.assign(deps, REAL_DEPS);
-});
-
-test("setupMessaging keeps ratchets when forward secrecy is requested", async () => {
-  deps.LXMRouter = FakeLxmRouter;
-  deps.toHex = () => "00";
-
-  const router = await setupMessaging(
-    {},
-    {},
-    { displayName: "Boat", forwardSecrecy: true },
-  );
-
-  assert.equal(
-    router.deliveryDest.ratchetsEnabled,
     true,
-    "ratchets left enabled when forward secrecy is opted in",
+    "ratchets left enabled on the delivery destination",
   );
   assert.ok(
-    Array.isArray(router.deliveryDest.ratchets),
-    "ratchet ring left intact when forward secrecy is opted in",
+    Array.isArray(router.deliveryDest.ratchets) &&
+      router.deliveryDest.ratchets.length > 0,
+    "ratchet ring left intact on the delivery destination",
   );
 
   Object.assign(deps, REAL_DEPS);
@@ -194,6 +171,31 @@ test("makeTelemetryDeliverer propagates delivery errors", async () => {
       deliverTelemetry("0123456789abcdef0123456789abcdef", new Uint8Array([1])),
     /identity unknown/,
   );
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeDeliverer forwards the arrival link id so replies ride back over the established link", async () => {
+  const router = new FakeLxmRouter({}, {});
+  const identity = { id: "me" };
+  deps.LXMessage = FakeLXMessage;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const deliver = makeDeliverer(router, identity);
+  const linkId = new Uint8Array(8).fill(2);
+  await deliver("0123456789abcdef0123456789abcdef", "", "Pong", linkId);
+
+  assert.equal(router.sent.length, 1);
+  assert.equal(
+    router.sent[0].linkId,
+    linkId,
+    "link id passed through to lxmf.send",
+  );
+
+  // Without a link id (e.g. notification forwarding) it is left undefined so
+  // the router falls back to opportunistic delivery.
+  await deliver("0123456789abcdef0123456789abcdef", "", "Hi");
+  assert.equal(router.sent[1].linkId, undefined);
 
   Object.assign(deps, REAL_DEPS);
 });

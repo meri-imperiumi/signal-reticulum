@@ -34,22 +34,20 @@ const deps = {
  * router remains usable for opportunistic delivery to crew whose identities are
  * already known.
  *
- * Forward-secrecy ratchets on the delivery destination are **off by default**.
- * The LXMRouter enables them unconditionally in `init()`, which makes the
- * `lxmf.delivery` announce carry a `ratchet_pub` (packet `context_flag = 1`).
- * Several LXMF clients (older Sideband / NomadNet / MeshChat and firmware
- * builds) parse the announce body at a fixed signature offset and silently
- * reject ratchet-bearing announces as signature-invalid, leaving the node
- * invisible on the mesh even though NomadNet (no ratchet) shows up fine
- * (PROTOCOL-SPEC.md §4.5 step 1, §7.3.3). A ratchet-less announce
- * (`context_flag = 0`) is interop-correct against every RNS 1.x receiver; the
- * only trade-off is forward secrecy — opportunistic inbound messages are then
- * encrypted to the long-term X25519 key. Operators whose clients all support
- * ratchets can opt in via `options.forwardSecrecy`.
+ * Forward-secrecy ratchets on the delivery destination are **kept enabled**
+ * (the `LXMRouter.init()` default), exactly like the LXMF echobot. This is
+ * not optional: peers such as NomadNet / Sideband learn our ratchet public
+ * key from the announce and encrypt opportunistic inbound messages to it.
+ * Disabling ratchets (as this code once did for announce-visibility reasons)
+ * leaves us holding no ratchet private key, so `Identity.decrypt()` returns
+ * null, the destination emits no PROOF, and the sender retransmits forever
+ * with no acknowledgement or response — even though outbound traffic
+ * (telemetry) still works. Keeping ratchets on ensures every ratchet-encrypted
+ * inbound message decrypts and is acknowledged.
  *
  * @param {object} rns - A Reticulum instance (owns the transport/interfaces).
  * @param {object} identity - The sender Reticulum identity.
- * @param {{displayName?:string, forwardSecrecy?:boolean}} [options]
+ * @param {{displayName?:string}} [options]
  * @param {(...args:any[])=>void} [log]
  * @returns {Promise<object>} The initialised LXMRouter (also exposes
  *   `deliveryDest.destinationHash`, the node's own LXMF address).
@@ -57,12 +55,6 @@ const deps = {
 async function setupMessaging(rns, identity, options = {}, log = () => {}) {
   const lxmf = new deps.LXMRouter(identity, rns);
   await lxmf.init();
-  // Drop the ratchet the router enabled in init() unless the operator opted
-  // into forward secrecy, so the announce is visible to every LXMF client.
-  if (lxmf.deliveryDest && !options.forwardSecrecy) {
-    lxmf.deliveryDest.ratchetsEnabled = false;
-    lxmf.deliveryDest.ratchets = null;
-  }
   if (options.displayName) {
     try {
       await lxmf.announce(options.displayName);
@@ -79,27 +71,36 @@ async function setupMessaging(rns, identity, options = {}, log = () => {}) {
 }
 
 /**
- * Builds a `deliver(destinationHashHex, title, content)` callback bound to the
- * given router and sender identity. Each call constructs and sends a single
- * LXMF message (opportunistic delivery) to the recipient's `lxmf.delivery`
- * destination.
+ * Builds a `deliver(destinationHashHex, title, content, linkId?)` callback
+ * bound to the given router and sender identity. Each call constructs and
+ * sends a single LXMF message to the recipient's `lxmf.delivery` destination.
+ *
+ * When `linkId` is supplied the message is delivered over that already-
+ * established Link — the same path the LXMF echobot uses to reply promptly
+ * (`LXMRouter.send` looks the link up in `transport.activeLinks`, waits for it
+ * to become ACTIVE, sends LINKIDENTIFY once, then the message). Without it the
+ * message falls back to opportunistic single-packet delivery (LXMF.md §5.1),
+ * which needs the recipient's identity to be known and a fresh path and is
+ * therefore flaky for replies. The `linkId` for an inbound message is carried
+ * by the router's `"message"` event as `event.detail.link`; command handlers
+ * thread it through to the deliverer so replies ride back on the arrival link.
  *
  * Rejects if the recipient's identity is unknown or delivery fails; the caller
  * (notification forwarding) logs and continues with the next recipient.
  *
  * @param {object} lxmf - An initialised LXMRouter.
  * @param {object} identity - The sender Reticulum identity.
- * @returns {(destinationHashHex:string, title:string, content:string)=>Promise<void>}
+ * @returns {(destinationHashHex:string, title:string, content:string, linkId?:Uint8Array|null)=>Promise<void>}
  */
 function makeDeliverer(lxmf, identity) {
-  return async function deliver(destinationHashHex, title, content) {
+  return async function deliver(destinationHashHex, title, content, linkId) {
     const message = new deps.LXMessage({
       sourceHash: lxmf.deliveryDest.destinationHash,
       destinationHash: deps.fromHex(destinationHashHex),
       title,
       content,
     });
-    await lxmf.send(message, identity);
+    await lxmf.send(message, identity, linkId);
   };
 }
 

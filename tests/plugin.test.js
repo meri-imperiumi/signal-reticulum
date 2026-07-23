@@ -130,8 +130,8 @@ class FakeLxmRouter extends EventTarget {
   async announce(name) {
     this.announceCalls.push(name);
   }
-  async send(message, identity) {
-    this.sent.push({ message, identity });
+  async send(message, identity, linkId) {
+    this.sent.push({ message, identity, linkId });
   }
 }
 FakeLxmRouter.instances = [];
@@ -528,7 +528,9 @@ test("schema exposes messaging and crew configuration groups", () => {
 
   const messagingGroup = schema.properties.messaging;
   assert.equal(messagingGroup.properties.send_alerts.default, true);
-  assert.equal(messagingGroup.properties.display_name.default, "Signal K");
+  // Empty by default so resolveDisplayName falls back to the vessel name
+  // (with callsign) rather than announcing a generic placeholder.
+  assert.equal(messagingGroup.properties.display_name.default, "");
 
   const crewGroup = schema.properties.crew;
   assert.equal(crewGroup.type, "array");
@@ -685,6 +687,32 @@ test('an incoming "ping" LXMF message is answered with "Pong"', async () => {
   const reply = router.sent[0].message.options;
   assert.equal(reply.content, "Pong");
   assert.deepEqual(reply.destinationHash, Buffer.from(source));
+});
+
+test('an incoming "ping" that arrived over a Link is replied over that same link', async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  await plugin.start({ messaging: {} });
+  const router = plugin.lxmf;
+
+  const source = new Uint8Array(16).fill(4);
+  const linkId = new Uint8Array(8).fill(7);
+  router.dispatchEvent(
+    new CustomEvent("message", {
+      detail: {
+        message: { sourceHash: source, content: "ping" },
+        link: linkId,
+      },
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(router.sent.length, 1, 'a "Pong" reply was sent');
+  assert.equal(
+    router.sent[0].linkId,
+    linkId,
+    "reply is sent over the arrival link id",
+  );
 });
 
 test("an unmatched LXMF message does not trigger a reply", async () => {

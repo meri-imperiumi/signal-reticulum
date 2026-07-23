@@ -19,7 +19,10 @@ module.exports = {
     typeof message.content === "string" &&
     message.content.trim().toLowerCase() === "ping",
   // Replies are sent to the sender's `lxmf.delivery` destination, which in an
-  // LXMF message is carried by the source hash.
-  handle: (message, _settings, deliver) =>
-    deliver(toHex(message.sourceHash), "", "Pong"),
+  // LXMF message is carried by the source hash. The arrival `linkId` is
+  // forwarded to the deliverer so the reply rides back over the same
+  // established Link the ping arrived on (the prompt/reliable path the LXMF
+  // echobot uses); it is `undefined` for opportunistic inbound messages.
+  handle: (message, _settings, deliver, _app, linkId) =>
+    deliver(toHex(message.sourceHash), "", "Pong", linkId),
 };

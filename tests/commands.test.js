@@ -12,11 +12,12 @@ function makeMessage(content, sourceHash = SOURCE) {
   return { content, sourceHash };
 }
 
-/** A recording deliver callback: `deliver(destHash, title, content)`. */
+/** A recording deliver callback:
+ * `deliver(destHash, title, content, linkId?)`. */
 function makeDeliver() {
   const calls = [];
-  const deliver = async (destHash, title, content) => {
-    calls.push({ destHash, title, content });
+  const deliver = async (destHash, title, content, linkId) => {
+    calls.push({ destHash, title, content, linkId });
   };
   return { deliver, calls };
 }
@@ -50,6 +51,14 @@ test("ping replies 'Pong' to the sender's source hash", async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].destHash, SOURCE_HEX);
   assert.equal(calls[0].content, "Pong");
+});
+
+test("ping forwards the arrival link id so the reply rides back over it", async () => {
+  const { deliver, calls } = makeDeliver();
+  const linkId = new Uint8Array(8).fill(3);
+  await ping.handle(makeMessage("ping"), {}, deliver, {}, linkId);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].linkId, linkId, "link id threaded into deliver");
 });
 
 test("isFromCrew returns true when the source matches a crew destination", () => {
@@ -87,6 +96,20 @@ test("handleMessage dispatches a matching ping and replies", async () => {
   assert.equal(calls[0].destHash, SOURCE_HEX);
   assert.equal(calls[0].content, "Pong");
   assert.ok(debugs.some((m) => /handled by command "ping"/.test(m)));
+});
+
+test("handleMessage forwards the arrival link id to the command's reply", async () => {
+  const { deliver, calls } = makeDeliver();
+  const linkId = new Uint8Array(8).fill(6);
+
+  await handleMessage(makeMessage("ping"), {}, deliver, {}, linkId);
+
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].linkId,
+    linkId,
+    "arrival link threaded through to the reply",
+  );
 });
 
 test("handleMessage does not reply to unmatched messages", async () => {

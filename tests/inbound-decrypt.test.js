@@ -1,26 +1,27 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { Reticulum, Identity, toHex } = require("@reticulum/core");
+const { Reticulum, Identity, Destination, toHex } = require("@reticulum/core");
 const { setupMessaging, makeDeliverer } = require("../plugin/messaging");
 const commands = require("../plugin/commands");
 
 /**
- * End-to-end ping/pong over an in-memory two-node mesh.
+ * Regression guard for the "no PROOF / no response" bug.
  *
- * Exercises the first-contact path that used to silently fail: a client sends
- * a "ping" to the plugin *before* the plugin has learned the client's identity
- * (no prior announce). The plugin must request the sender's path, learn the
- * identity from the path-response announce, re-process the parked message, and
- * reply "Pong" — otherwise the client sees a delivery proof but no response.
+ * Peers (NomadNet / Sideband) learn our ratchet public key from the
+ * lxmf.delivery announce and encrypt opportunistic inbound messages to it. If
+ * the destination holds no matching ratchet private key, `Identity.decrypt()`
+ * returns null, no PROOF is emitted, and the sender retransmits forever with no
+ * acknowledgement — exactly what was observed against NomadNet while outbound
+ * telemetry still worked. setupMessaging must therefore keep the ratchets that
+ * `LXMRouter.init()` enables (the LXMF echobot configuration).
  *
- * This relies on the @reticulum/core LXMRouter actually requesting the path
- * and re-processing parked messages on announce; with an older library the
- * plugin would never dispatch the message.
+ * This drives the real @reticulum/core stack over an in-memory bridge and
+ * asserts both that the destination holds a ratchet and that a real
+ * opportunistic round-trip (encrypted to that ratchet) decrypts and is
+ * answered.
  */
 
-/** Two in-memory interfaces bridged full-duplex: a packet written to one is
- * delivered as an inbound "packet" event on the other. */
 function makeBridge(nameA, nameB) {
   class BridgeIface extends EventTarget {
     constructor(name) {
@@ -58,10 +59,7 @@ const makeNode = (iface) => {
   return rns;
 };
 
-/** Polls `fn` until it returns truthy, resolving with that value (timeout
- * rejects). Used because the multi-hop path-request → announce → re-process
- * flow is async even though the bridge is synchronous. */
-async function waitFor(fn, timeoutMs = 2000) {
+async function waitFor(fn, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const v = fn();
@@ -71,7 +69,7 @@ async function waitFor(fn, timeoutMs = 2000) {
   throw new Error("waitFor timed out");
 }
 
-test("ping/pong works on first contact before the sender has announced", async () => {
+test("setupMessaging keeps a ratchet and an opportunistic inbound message decrypts and is answered", async () => {
   const { a: ifA, b: ifB } = makeBridge("plug-iface", "client-iface");
   const rnsA = makeNode(ifA);
   const rnsB = makeNode(ifB);
@@ -79,12 +77,21 @@ test("ping/pong works on first contact before the sender has announced", async (
   const idB = await Identity.generate();
 
   try {
-    // Plugin node A: bring up LXMF and reply to commands (ping → Pong).
+    // Plugin node A — setupMessaging must leave the init() ratchet in place.
     const lxmA = await setupMessaging(rnsA, idA, { displayName: "Plugin" });
+    assert.equal(
+      lxmA.deliveryDest.ratchetsEnabled,
+      true,
+      "delivery destination keeps ratchets enabled",
+    );
+    assert.ok(
+      Array.isArray(lxmA.deliveryDest.ratchets) &&
+        lxmA.deliveryDest.ratchets.length > 0,
+      "delivery destination holds a ratchet private key",
+    );
+
     const deliverA = makeDeliverer(lxmA, idA);
-    let pluginSawPing = false;
     lxmA.addEventListener("message", (ev) => {
-      pluginSawPing = ev.detail.message.content === "ping";
       commands
         .handleMessage(
           ev.detail.message,
@@ -96,34 +103,34 @@ test("ping/pong works on first contact before the sender has announced", async (
         .catch(() => {});
     });
 
-    // Client node B: initialise a router but DO NOT announce, so A has never
-    // heard B's identity (the first-contact case).
+    // Client node B (also ratcheted) announces so A can reply.
     const lxmB = await setupMessaging(rnsB, idB, { displayName: "Client" });
     let clientPong = null;
     lxmB.addEventListener("message", (ev) => {
       clientPong = ev.detail.message.content;
     });
 
-    const aHash = toHex(lxmA.deliveryDest.destinationHash);
-    const deliverB = makeDeliverer(lxmB, idB);
+    await new Promise((r) => setTimeout(r, 50));
 
-    // Let A's announce reach B through the bridge so B can address it, then
-    // send the ping. (The bridge is synchronous, so a brief wait is plenty.)
-    await new Promise((r) => setTimeout(r, 30));
-
-    await deliverB(aHash, "", "ping");
-
-    // A must dispatch the ping (after requesting B's path + re-processing)…
-    await waitFor(() => pluginSawPing);
-    // …and reply "Pong", which B must receive.
-    await waitFor(() => clientPong === "Pong");
-
-    assert.equal(
-      pluginSawPing,
-      true,
-      "plugin dispatched the first-contact ping",
+    // B must have learned A's ratchet from the announce — the exact key A
+    // holds, so the opportunistic packet B encrypts is one A can decrypt.
+    const learned = Destination.recallRatchets(
+      lxmA.deliveryDest.destinationHash,
     );
-    assert.equal(clientPong, "Pong", "client received the pong reply");
+    assert.ok(
+      learned && learned.length > 0,
+      "client learned the plugin's ratchet from the announce",
+    );
+
+    const deliverB = makeDeliverer(lxmB, idB);
+    await deliverB(toHex(lxmA.deliveryDest.destinationHash), "", "ping");
+
+    await waitFor(() => clientPong === "Pong");
+    assert.equal(
+      clientPong,
+      "Pong",
+      "ratchet-encrypted inbound message decrypted, proven, and answered",
+    );
   } finally {
     await rnsA.stop();
     await rnsB.stop();

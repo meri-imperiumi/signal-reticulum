@@ -52,13 +52,22 @@ function isFromCrew(message, settings) {
  * each message produces at most one response. Per-command failures are logged
  * and do not abort the caller.
  *
+ * `linkId` (the inbound message's arrival Link id, `event.detail.link` from
+ * the LXMRouter "message" event) is forwarded to the matched command so its
+ * reply rides back over the same established Link instead of falling back to
+ * flaky opportunistic delivery. It may be omitted for callers that have no
+ * arrival link (e.g. a synthetic dispatch); the command then replies
+ * opportunistically.
+ *
  * @param {{sourceHash:Uint8Array, content?:string}|null|undefined} message
  * @param {object|null|undefined} settings
- * @param {(destinationHashHex:string, title:string, content:string)=>Promise<void>|undefined} deliver
+ * @param {(destinationHashHex:string, title:string, content:string, linkId?:Uint8Array|null)=>Promise<void>|undefined} deliver
  * @param {{debug?:(...args:any[])=>void, error?:(...args:any[])=>void}|null|undefined} [app]
+ * @param {Uint8Array|null|undefined} [linkId] - The arrival Link id to reply
+ *   over, from the router's `event.detail.link`.
  * @returns {Promise<void>}
  */
-async function handleMessage(message, settings, deliver, app) {
+async function handleMessage(message, settings, deliver, app, linkId) {
   if (!message || !deliver) {
     return;
   }
@@ -75,7 +84,7 @@ async function handleMessage(message, settings, deliver, app) {
       continue;
     }
     try {
-      await command.handle(message, settings, deliver, app);
+      await command.handle(message, settings, deliver, app, linkId);
       if (app && typeof app.debug === "function") {
         app.debug(`LXMF message handled by command "${name}"`);
       }
