@@ -15,7 +15,7 @@
  * @file commands/index.js
  */
 
-const { toHex } = require("reticulum-js");
+const { toHex } = require("@reticulum/core");
 const { effectiveCrew } = require("../notifications");
 
 /** Registered commands, keyed by name. Add new commands here. */

@@ -4,7 +4,7 @@
  * callback used by the notification forwarding logic.
  *
  * The LXMF transport classes are injected through {@link deps} (defaulting to
- * the real `reticulum-js`) so this module can be unit-tested without any
+ * the real `@reticulum/core`) so this module can be unit-tested without any
  * network I/O.
  *
  * Delivery is opportunistic by default: each message is sent as a single
@@ -15,7 +15,7 @@
  * @file messaging.js
  */
 
-const RNS = require("reticulum-js");
+const RNS = require("@reticulum/core");
 
 /** Injected transport classes; tests swap these for fakes. */
 const deps = {

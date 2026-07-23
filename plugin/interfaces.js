@@ -9,7 +9,7 @@
  * @file interfaces.js
  */
 
-const RNS = require("reticulum-js");
+const { getInterface: defaultGetInterface } = require("@reticulum/node");
 
 /** Default interfaces applied when none are configured (zero-config peering). */
 const DEFAULT_INTERFACES = Object.freeze([{ type: "auto" }]);
@@ -68,7 +68,7 @@ function optionsFromEntry(entry) {
 async function setupInterfaces(
   rns,
   configInterfaces,
-  getInterface = RNS.getInterface,
+  getInterface = defaultGetInterface,
   log = () => {},
 ) {
   const connected = [];
@@ -145,43 +145,6 @@ async function teardownInterfaces(rns, interfaces, log = () => {}) {
   }
 }
 
-/**
- * Attempts to connect to a locally running shared Reticulum instance (a Python
- * `rnsd` or our own daemon) and reuse its mesh interfaces, instead of opening
- * our own. Mirrors the client side of the Python reference
- * `Reticulum.__start_local_interface`.
- *
- * Delegates to `rns.connectToSharedInstance`, which auto-discovers the endpoint
- * from the Reticulum config (`~/.reticulum/config`) when no options are given.
- * Returns the connected interface on success, or `null` when the node has no
- * such method, sharing is disabled in the config, or the shared instance is
- * not currently reachable. Never throws, so callers can cleanly fall back to
- * bringing up their own interfaces.
- *
- * @param {{connectToSharedInstance?: (options: object) => Promise<object|null>}} rns
- * @param {object} [options] - Forwarded to `connectToSharedInstance`.
- * @param {(...args:any[])=>void} [log]
- * @returns {Promise<object|null>}
- */
-async function connectSharedInstance(rns, options, log = () => {}) {
-  if (!rns || typeof rns.connectToSharedInstance !== "function") {
-    return null;
-  }
-  let iface;
-  try {
-    iface = await rns.connectToSharedInstance(options || {});
-  } catch (e) {
-    log(`Failed to connect to shared instance: ${e.message}`);
-    return null;
-  }
-  if (!iface) {
-    log("No shared Reticulum instance available");
-    return null;
-  }
-  log("Connected to shared Reticulum instance");
-  return iface;
-}
-
 module.exports = {
   DEFAULT_INTERFACES,
   getDefaultInterfaces,
@@ -189,5 +152,4 @@ module.exports = {
   optionsFromEntry,
   setupInterfaces,
   teardownInterfaces,
-  connectSharedInstance,
 };

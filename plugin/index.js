@@ -4,12 +4,15 @@
  * @param {import("@signalk/server-api").ServerAPI} app
  * @returns {import("@signalk/server-api").Plugin}
  */
-const RNS = require("reticulum-js");
-const { toHex } = RNS;
+const { Reticulum, toHex } = require("@reticulum/core");
+const {
+  getInterface,
+  listInterfaces,
+  LocalClientInterface,
+} = require("@reticulum/node");
 const { buildPluginSchema } = require("./schema");
 const { resolveIdentity } = require("./identity");
 const {
-  connectSharedInstance,
   effectiveInterfaces,
   setupInterfaces,
   teardownInterfaces,
@@ -20,14 +23,37 @@ const { resolveDisplayName } = require("./displayname");
 const commands = require("./commands");
 
 /**
- * Overridable dependencies (the Reticulum orchestrator class and the interface
- * registry lookup). Defaults point at the real reticulum-js; tests swap these
- * for fakes so the plugin can be exercised without network I/O.
+ * Overridable dependencies (the Reticulum orchestrator class, the interface
+ * registry lookup, and the shared-instance connector factory). Defaults point
+ * at the real @reticulum packages; tests swap these for fakes so the plugin
+ * can be exercised without network I/O.
  */
 const deps = {
-  Reticulum: RNS.Reticulum,
-  getInterface: RNS.getInterface,
+  Reticulum,
+  getInterface,
+  connectSharedInstance: LocalClientInterface.connectToSharedInstance,
 };
+
+/**
+ * Reads a `vessels.self` path from the Signal K app, tolerating servers (and
+ * test fakes) that do not expose `getSelfPath`. Returns the raw value — a plain
+ * string or a `{value}` wrapper — or `undefined`; {@link resolveDisplayName}
+ * normalises it from there.
+ *
+ * @param {{getSelfPath?: (path: string) => unknown}|undefined} app
+ * @param {string} path
+ * @returns {unknown}
+ */
+function readSelf(app, path) {
+  if (!app || typeof app.getSelfPath !== "function") {
+    return undefined;
+  }
+  try {
+    return app.getSelfPath(path);
+  } catch {
+    return undefined;
+  }
+}
 
 module.exports = (app) => {
   /** Tracks active notification episodes so flapping alerts aren't re-sent. */
@@ -109,10 +135,18 @@ module.exports = (app) => {
         );
         let usedSharedInstance = false;
         if (useSharedInstance) {
-          const shared = await connectSharedInstance(rns, {}, app.debug);
-          if (shared) {
-            plugin.interfaces = [shared];
-            usedSharedInstance = true;
+          try {
+            const shared = await deps.connectSharedInstance({});
+            if (shared) {
+              rns.addInterface(shared, true);
+              plugin.interfaces = [shared];
+              usedSharedInstance = true;
+              app.debug("Connected to shared Reticulum instance");
+            } else {
+              app.debug("No shared Reticulum instance available");
+            }
+          } catch (e) {
+            app.debug(`Failed to connect to shared instance: ${e.message}`);
           }
         }
 
@@ -276,7 +310,7 @@ module.exports = (app) => {
       app.setPluginStatus("Stopped");
     },
 
-    schema: () => buildPluginSchema(RNS.listInterfaces()),
+    schema: () => buildPluginSchema(listInterfaces()),
   };
   return plugin;
 };

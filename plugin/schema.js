@@ -72,7 +72,7 @@ function wrapInterfaceSchema(entry) {
  * Builds the full plugin configuration JSON Schema.
  *
  * @param {InterfaceRegistryEntry[]} interfaces - Entries from
- *   `reticulum-js`'s `listInterfaces()`.
+ *   `@reticulum/node`'s `listInterfaces()`.
  * @returns {Record<string, any>} A JSON Schema (draft-07) object describing the
  *   plugin configuration, with Reticulum interfaces grouped under `interfaces`.
  */

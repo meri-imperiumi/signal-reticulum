@@ -1,8 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const RNS = require("reticulum-js");
-const { toHex } = RNS;
+const { Identity, toHex } = require("@reticulum/core");
+const { listInterfaces } = require("@reticulum/node");
 const makePlugin = require("../plugin/index.js");
 const messaging = require("../plugin/messaging");
 
@@ -38,23 +38,7 @@ class FakeRns {
   removeInterface(iface) {
     this.removed.push(iface);
   }
-  // Shared-instance support. Returns null by default (nothing reachable) so
-  // the plugin falls back to configured interfaces; tests flip
-  // FakeRns.sharedAvailable to simulate a running rnsd.
-  async connectToSharedInstance(options) {
-    this.sharedInstanceOptions = options;
-    if (!FakeRns.sharedAvailable) {
-      return null;
-    }
-    this.shared = {
-      name: "shared-instance",
-      async disconnect() {},
-    };
-    this.addInterface(this.shared, true);
-    return this.shared;
-  }
 }
-FakeRns.sharedAvailable = false;
 
 // Install fakes on the plugin's dependency seam.
 makePlugin.deps.Reticulum = FakeRns;
@@ -62,6 +46,19 @@ makePlugin.deps.getInterface = (id) => {
   if (id === "auto") return makeFakeInterfaceClass("auto");
   if (id === "tcp-client") return makeFakeInterfaceClass("tcp-client");
   return undefined;
+};
+
+// Shared-instance connector override. The real factory is
+// `LocalClientInterface.connectToSharedInstance` from @reticulum/node; tests
+// flip `sharedState.available` to simulate a reachable rnsd. The factory only
+// discovers and connects — the plugin wires the result into the transport.
+const sharedState = { available: false, calls: 0 };
+makePlugin.deps.connectSharedInstance = async () => {
+  sharedState.calls += 1;
+  if (!sharedState.available) {
+    return null;
+  }
+  return { name: "shared-instance", async disconnect() {} };
 };
 
 // --- Fakes so the plugin's LXMF messaging can be exercised without RNS I/O ---
@@ -154,7 +151,7 @@ test("schema is built from the live RNS interface registry", () => {
   const schema = plugin.schema();
 
   const branches = schema.properties.interfaces.items.oneOf;
-  const registered = RNS.listInterfaces();
+  const registered = listInterfaces();
 
   assert.equal(
     branches.length,
@@ -174,7 +171,7 @@ test("schema is built from the live RNS interface registry", () => {
 test("every schema branch exposes the type discriminator and keeps the interface's required fields", () => {
   const plugin = makePlugin(makeApp());
   const branches = plugin.schema().properties.interfaces.items.oneOf;
-  const byId = Object.fromEntries(RNS.listInterfaces().map((e) => [e.id, e]));
+  const byId = Object.fromEntries(listInterfaces().map((e) => [e.id, e]));
 
   for (const branch of branches) {
     const entry = byId[branch.properties.type.const];
@@ -229,7 +226,7 @@ test("start connects explicitly configured interfaces", async () => {
   const app = makeApp();
   const plugin = makePlugin(app);
 
-  const source = await RNS.Identity.generate();
+  const source = await Identity.generate();
   const config = {
     identity: {
       privateKey: toHex(await source.getPrivateKey()),
@@ -261,7 +258,7 @@ test("start records interface errors and keeps the rest running", async () => {
     return undefined;
   };
 
-  const source = await RNS.Identity.generate();
+  const source = await Identity.generate();
   await plugin.start({
     identity: {
       privateKey: toHex(await source.getPrivateKey()),
@@ -514,25 +511,27 @@ test("stop tears down messaging and the notification subscription", async () => 
 test("start uses a shared Reticulum instance when one is available", async () => {
   const app = makeApp();
   const plugin = makePlugin(app);
-  FakeRns.sharedAvailable = true;
+  sharedState.calls = 0;
+  sharedState.available = true;
 
   try {
     await plugin.start({});
 
+    assert.equal(sharedState.calls, 1, "shared-instance connector attempted");
     assert.equal(plugin.interfaces.length, 1);
     assert.equal(plugin.interfaces[0].name, "shared-instance");
-    // The shared interface is attached by connectToSharedInstance itself.
+    // The shared interface returned by the factory is attached to the node.
     assert.equal(plugin.rns.added.length, 1);
     assert.match(app.statusCalls[0], /connected to shared Reticulum instance/);
   } finally {
-    FakeRns.sharedAvailable = false;
+    sharedState.available = false;
   }
 });
 
 test("start falls back to configured interfaces when no shared instance is reachable", async () => {
   const app = makeApp();
   const plugin = makePlugin(app);
-  FakeRns.sharedAvailable = false;
+  sharedState.available = false;
 
   await plugin.start({});
 
@@ -544,19 +543,16 @@ test("start falls back to configured interfaces when no shared instance is reach
 test("start does not attempt the shared instance when use_shared_instance is false", async () => {
   const app = makeApp();
   const plugin = makePlugin(app);
-  FakeRns.sharedAvailable = true;
+  sharedState.calls = 0;
+  sharedState.available = true;
 
   try {
     await plugin.start({ use_shared_instance: false });
 
-    assert.equal(
-      plugin.rns.sharedInstanceOptions,
-      undefined,
-      "shared instance not attempted",
-    );
+    assert.equal(sharedState.calls, 0, "shared instance not attempted");
     assert.equal(plugin.interfaces[0].type, "auto");
     assert.match(app.statusCalls[0], /1 interface\(s\) connected/);
   } finally {
-    FakeRns.sharedAvailable = false;
+    sharedState.available = false;
   }
 });

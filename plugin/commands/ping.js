@@ -8,7 +8,7 @@
  * @file commands/ping.js
  */
 
-const { toHex } = require("reticulum-js");
+const { toHex } = require("@reticulum/core");
 
 module.exports = {
   crewOnly: false,

@@ -8,7 +8,6 @@ const {
   optionsFromEntry,
   setupInterfaces,
   teardownInterfaces,
-  connectSharedInstance,
 } = require("../plugin/interfaces");
 
 /** A fake interface class that records its lifecycle for assertions. */
@@ -183,57 +182,4 @@ test("teardownInterfaces keeps going when an interface throws on disconnect", as
   assert.equal(calm.disconnectCalls, 1);
   assert.equal(rns.removed.length, 2);
   assert.ok(messages.some((m) => /disconnecting interface boom/.test(m)));
-});
-
-test("connectSharedInstance returns null when the node cannot share", async () => {
-  const logs = [];
-  const log = (...args) => logs.push(args.join(" "));
-  // No connectToSharedInstance method at all.
-  assert.equal(await connectSharedInstance({}, {}, log), null);
-  assert.equal(await connectSharedInstance(null, {}, log), null);
-  assert.equal(logs.length, 0, "nothing logged when the method is absent");
-});
-
-test("connectSharedInstance returns the connected interface", async () => {
-  const shared = { name: "shared-instance" };
-  const rns = {
-    async connectToSharedInstance(options) {
-      this.options = options;
-      return shared;
-    },
-  };
-  const logs = [];
-  const log = (...args) => logs.push(args.join(" "));
-
-  const result = await connectSharedInstance(rns, { foo: 1 }, log);
-
-  assert.equal(result, shared);
-  assert.deepEqual(rns.options, { foo: 1 });
-  assert.ok(logs.some((m) => /Connected to shared Reticulum instance/.test(m)));
-});
-
-test("connectSharedInstance returns null when no shared instance is available", async () => {
-  const rns = {
-    async connectToSharedInstance() {
-      return null;
-    },
-  };
-  const logs = [];
-  const log = (...args) => logs.push(args.join(" "));
-
-  assert.equal(await connectSharedInstance(rns, {}, log), null);
-  assert.ok(logs.some((m) => /No shared Reticulum instance available/.test(m)));
-});
-
-test("connectSharedInstance swallows connect errors and returns null", async () => {
-  const rns = {
-    async connectToSharedInstance() {
-      throw new Error("boom");
-    },
-  };
-  const logs = [];
-  const log = (...args) => logs.push(args.join(" "));
-
-  assert.equal(await connectSharedInstance(rns, {}, log), null);
-  assert.ok(logs.some((m) => /Failed to connect to shared instance/.test(m)));
 });

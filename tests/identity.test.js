@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { Identity, toHex } = require("reticulum-js");
+const { Identity, toHex } = require("@reticulum/core");
 const {
   resolveIdentity,
   normalizeHex,

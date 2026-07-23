@@ -9,7 +9,7 @@
  * @file identity.js
  */
 
-const { Identity, toHex, fromHex } = require("reticulum-js");
+const { Identity, toHex, fromHex } = require("@reticulum/core");
 
 /** Raw private key export length, in bytes (x25519 priv/pub + ed25519 priv/pub). */
 const PRIVATE_KEY_BYTES = 128;
