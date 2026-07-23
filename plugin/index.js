@@ -16,6 +16,7 @@ const { effectiveInterfaces, setupInterfaces } = require("./interfaces");
 const { sendNotification } = require("./notifications");
 const { setupMessaging, makeDeliverer } = require("./messaging");
 const { setupNomadNet } = require("./nomadnet");
+const compression = require("./compression");
 const { resolveDisplayName } = require("./displayname");
 const { createStorageAdapter, setupCrewPersistence } = require("./storage");
 const commands = require("./commands");
@@ -161,6 +162,18 @@ module.exports = (app) => {
         const rns = new deps.Reticulum(rnsOptions(config, storageAdapter));
         plugin.rns = rns;
         app.debug(`Loaded Reticulum identity ${hashHex}`);
+
+        // Wire bzip2 as the Reticulum compressionProvider so compressed
+        // inbound/outbound Resources work (SPEC §10.2). Best-effort: a WASM
+        // init failure is logged and leaves compression disabled rather than
+        // failing start.
+        try {
+          rns.compressionProvider = await compression.createBz2Provider(
+            app.debug,
+          );
+        } catch (e) {
+          app.debug(`bzip2 provider setup failed: ${e.message}`);
+        }
 
         // Pre-emptively persist crew member identities the moment their
         // announces are heard, so a restart can still reach them.

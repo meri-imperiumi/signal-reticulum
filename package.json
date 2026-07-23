@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/meri-imperiumi/signalk-reticulum#readme",
   "dependencies": {
+    "@digitaldefiance/bzip2-wasm": "^1.1.1",
     "@reticulum/core": "^0.4.0",
     "@reticulum/node": "^0.4.0"
   },

@@ -1,6 +1,7 @@
 # Changelog
 ## [Unreleased]
 ### Added
+- bzip2 compression support: `@digitaldefiance/bzip2-wasm` is wired as the Reticulum `compressionProvider`, so compressed inbound/outbound Resource transfers (large LXMF direct messages, NomadNet pages, propagation containers, PROTOCOL-SPEC.md §10.2) work. The adapter sizes the compress output buffer for bzip2's worst-case expansion so incompressible input no longer overflows
 - Configurable Reticulum log level: a new top-level `log_level` option (default `notice`) controls the verbosity of the Reticulum stack's own diagnostic output in the Signal K server log, independent of the plugin's messages. Unset falls back to Reticulum's default / the `RETICULUM_LOG_LEVEL` environment variable
 - Optional NomadNet site: when the new `nomadnet` config group is enabled, the node announces a `nomadnetwork.node` destination and serves a `/page/index.mu` page (currently just the vessel name) that NomadNet clients (Sideband, NomadNet, MeshChat) can browse. The page content is evaluated per-request so live telemetry can be added in later steps. Off by default
 - Filesystem-backed persistence: a `FileStorageAdapter` (from `@reticulum/node`) rooted under `app.getDataDirPath()` is wired into the Reticulum node so learned peer identities, ratchet rings and path entries survive restarts. Persistence degrades gracefully to in-memory only on servers that expose no data directory

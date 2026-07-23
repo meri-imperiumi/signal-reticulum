@@ -8,6 +8,7 @@ const { listInterfaces, FileStorageAdapter } = require("@reticulum/node");
 const makePlugin = require("../plugin/index.js");
 const messaging = require("../plugin/messaging");
 const nomadnet = require("../plugin/nomadnet");
+const compression = require("../plugin/compression");
 
 // --- Fakes so the plugin can be started without any real network I/O --------
 
@@ -182,6 +183,29 @@ nomadnet.deps.Destination = FakeNomadDestination;
 nomadnet.deps.DestType = { SINGLE: "single" };
 nomadnet.deps.Allow = { ALL: 0x01 };
 nomadnet.deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
+
+// --- Fakes so the plugin's bzip2 provider can be exercised without WASM -----
+
+class FakeBZip2 {
+  constructor() {
+    this.initCalls = 0;
+    this.compressCalls = [];
+    this.decompressCalls = [];
+  }
+  async init() {
+    this.initCalls += 1;
+  }
+  compress(data, blockSize, outLen) {
+    this.compressCalls.push({ data, blockSize, outLen });
+    return data;
+  }
+  decompress(data, size) {
+    this.decompressCalls.push({ data, size });
+    return data;
+  }
+}
+
+compression.deps.BZip2 = FakeBZip2;
 
 /** Minimal stand-in for the Signal K ServerAPI the plugin touches. */
 function makeApp() {
@@ -427,6 +451,43 @@ test("a blank log level is ignored so the Reticulum default applies", async () =
   await plugin.start({ log_level: "   " });
 
   assert.ok(!("logLevel" in plugin.rns.config));
+});
+
+test("start wires a bzip2 compression provider into the Reticulum node", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+
+  await plugin.start({});
+
+  const provider = plugin.rns.compressionProvider;
+  assert.ok(provider, "compressionProvider set on the node");
+  const data = new Uint8Array([1, 2, 3]);
+  assert.deepEqual(provider.compress(data), data, "compress forwards");
+  assert.deepEqual(provider.decompress(data, 3), data, "decompress forwards");
+});
+
+test("start keeps running without a compression provider when bzip2 init fails", async () => {
+  const app = makeApp();
+  const plugin = makePlugin(app);
+  const real = compression.deps.BZip2;
+  compression.deps.BZip2 = class extends FakeBZip2 {
+    async init() {
+      throw new Error("wasm unavailable");
+    }
+  };
+
+  try {
+    await plugin.start({});
+
+    assert.equal(plugin.rns.compressionProvider, undefined);
+    assert.ok(
+      app.debugCalls.some((args) =>
+        /bzip2 provider setup failed/.test(args.join(" ")),
+      ),
+    );
+  } finally {
+    compression.deps.BZip2 = real;
+  }
 });
 
 test("schema exposes a Reticulum log level selector defaulting to notice", () => {
