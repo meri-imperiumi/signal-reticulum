@@ -239,7 +239,14 @@ module.exports = (app) => {
           plugin.lxmf = await setupMessaging(
             rns,
             plugin.identity,
-            { displayName },
+            {
+              displayName,
+              forwardSecrecy: !!(
+                config &&
+                config.messaging &&
+                config.messaging.forward_secrecy
+              ),
+            },
             app.debug,
           );
           deliver = makeDeliverer(plugin.lxmf, plugin.identity);

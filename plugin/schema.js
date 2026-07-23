@@ -167,6 +167,20 @@ function buildPluginSchema(interfaces) {
             title: "Send Signal K alerts to the crew via LXMF",
             default: true,
           },
+          forward_secrecy: {
+            type: "boolean",
+            title: "Enable LXMF forward-secrecy ratchets",
+            description:
+              "When enabled, the lxmf.delivery announce advertises a " +
+              "rotating ratchet public key so opportunistic messages are " +
+              "encrypted for forward secrecy. Off by default: a ratchet-bearing " +
+              "announce is silently rejected as signature-invalid by several " +
+              "LXMF clients (older Sideband / NomadNet / MeshChat, firmware " +
+              "builds), which makes the node invisible on the mesh. Only enable " +
+              "this once every client you need to interoperate with is known to " +
+              "support ratchet-bearing announces.",
+            default: false,
+          },
           display_name: {
             type: "string",
             title: "LXMF display name",

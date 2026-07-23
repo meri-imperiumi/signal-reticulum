@@ -13,6 +13,15 @@ class FakeLxmRouter {
     this.sent = [];
     this.deliveryDest = {
       destinationHash: new Uint8Array(16).fill(7),
+      // init() enables forward-secrecy ratchets on the delivery destination;
+      // mirror that so the disable-by-default path is observable.
+      ratchetsEnabled: true,
+      ratchets: [
+        {
+          privateKey: new Uint8Array(32).fill(1),
+          publicKey: new Uint8Array(32).fill(2),
+        },
+      ],
     };
   }
   async init() {
@@ -79,6 +88,49 @@ test("setupMessaging skips announce when no display name is given", async () => 
   const router = await setupMessaging({}, {}, {});
 
   assert.equal(router.announceCalls.length, 0);
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("setupMessaging disables forward-secrecy ratchets by default so the announce is visible to every client", async () => {
+  deps.LXMRouter = FakeLxmRouter;
+  deps.toHex = () => "00";
+
+  const router = await setupMessaging({}, {}, { displayName: "Boat" });
+
+  assert.equal(
+    router.deliveryDest.ratchetsEnabled,
+    false,
+    "ratchets disabled on the delivery destination",
+  );
+  assert.equal(
+    router.deliveryDest.ratchets,
+    null,
+    "ratchet ring cleared on the delivery destination",
+  );
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("setupMessaging keeps ratchets when forward secrecy is requested", async () => {
+  deps.LXMRouter = FakeLxmRouter;
+  deps.toHex = () => "00";
+
+  const router = await setupMessaging(
+    {},
+    {},
+    { displayName: "Boat", forwardSecrecy: true },
+  );
+
+  assert.equal(
+    router.deliveryDest.ratchetsEnabled,
+    true,
+    "ratchets left enabled when forward secrecy is opted in",
+  );
+  assert.ok(
+    Array.isArray(router.deliveryDest.ratchets),
+    "ratchet ring left intact when forward secrecy is opted in",
+  );
+
   Object.assign(deps, REAL_DEPS);
 });
 

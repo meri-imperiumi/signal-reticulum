@@ -17,6 +17,7 @@
 - Shared-instance connection now uses `LocalClientInterface.connectToSharedInstance` from `@reticulum/node` directly (the node no longer exposes it), and the plugin attaches the returned interface to the transport itself
 
 ### Fixed
+- LXMF clients could not see the node's `lxmf.delivery` announce even though the NomadNet announce showed up fine: the LXMF delivery destination advertised a forward-secrecy ratchet (announce `context_flag = 1`), which clients that parse the announce body at a fixed signature offset (older Sideband / NomadNet / MeshChat, firmware builds) silently reject as signature-invalid. Ratchets are now off by default so the announce is ratchet-less (`context_flag = 0`), which is interop-correct against every RNS 1.x receiver. Operators whose clients all support ratchet-bearing announces can re-enable forward secrecy with the new `messaging.forward_secrecy` option
 - NomadNet clients could see the announced node but their page requests timed out: the `nomadnetwork.node` destination now accepts incoming LINKREQUESTs (sending the LRPROOF that completes the link handshake) instead of only being visible. Page REQUESTs are then served over the established link
 
 ### Added

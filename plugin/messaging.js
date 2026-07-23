@@ -33,9 +33,22 @@ const deps = {
  * router remains usable for opportunistic delivery to crew whose identities are
  * already known.
  *
+ * Forward-secrecy ratchets on the delivery destination are **off by default**.
+ * The LXMRouter enables them unconditionally in `init()`, which makes the
+ * `lxmf.delivery` announce carry a `ratchet_pub` (packet `context_flag = 1`).
+ * Several LXMF clients (older Sideband / NomadNet / MeshChat and firmware
+ * builds) parse the announce body at a fixed signature offset and silently
+ * reject ratchet-bearing announces as signature-invalid, leaving the node
+ * invisible on the mesh even though NomadNet (no ratchet) shows up fine
+ * (PROTOCOL-SPEC.md §4.5 step 1, §7.3.3). A ratchet-less announce
+ * (`context_flag = 0`) is interop-correct against every RNS 1.x receiver; the
+ * only trade-off is forward secrecy — opportunistic inbound messages are then
+ * encrypted to the long-term X25519 key. Operators whose clients all support
+ * ratchets can opt in via `options.forwardSecrecy`.
+ *
  * @param {object} rns - A Reticulum instance (owns the transport/interfaces).
  * @param {object} identity - The sender Reticulum identity.
- * @param {{displayName?:string}} [options]
+ * @param {{displayName?:string, forwardSecrecy?:boolean}} [options]
  * @param {(...args:any[])=>void} [log]
  * @returns {Promise<object>} The initialised LXMRouter (also exposes
  *   `deliveryDest.destinationHash`, the node's own LXMF address).
@@ -43,6 +56,12 @@ const deps = {
 async function setupMessaging(rns, identity, options = {}, log = () => {}) {
   const lxmf = new deps.LXMRouter(identity, rns);
   await lxmf.init();
+  // Drop the ratchet the router enabled in init() unless the operator opted
+  // into forward secrecy, so the announce is visible to every LXMF client.
+  if (lxmf.deliveryDest && !options.forwardSecrecy) {
+    lxmf.deliveryDest.ratchetsEnabled = false;
+    lxmf.deliveryDest.ratchets = null;
+  }
   if (options.displayName) {
     try {
       await lxmf.announce(options.displayName);
