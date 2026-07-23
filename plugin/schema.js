@@ -234,6 +234,17 @@ function buildPluginSchema(interfaces) {
               "(with callsign) when left empty.",
             default: "",
           },
+          banner: {
+            type: "string",
+            title: "Page banner",
+            description:
+              "Optional ASCII/micron banner shown at the top of the index " +
+              "page instead of the vessel name. Multi-line ASCII art is " +
+              "rendered as-is; lines that begin with micron directives (!, >, " +
+              "-, etc.) are interpreted by the client, so prefer art that " +
+              "does not. Leave empty to show the vessel name as a heading.",
+            default: "",
+          },
         },
         additionalProperties: false,
       },

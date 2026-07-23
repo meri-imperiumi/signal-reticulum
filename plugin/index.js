@@ -288,6 +288,33 @@ module.exports = (app) => {
                 displayName: nodeDisplayName,
                 getContext: () => ({
                   vesselName: readSelf(app, "name"),
+                  banner: config.nomadnet && config.nomadnet.banner,
+                  telemetry: {
+                    state: readSelf(app, "navigation.state"),
+                    anchorDistance: readSelf(
+                      app,
+                      "navigation.anchor.distanceFromBow",
+                    ),
+                    depth: readSelf(app, "environment.depth.belowSurface"),
+                    tideHeight: readSelf(app, "environment.tide.heightNow"),
+                    tideState: readSelf(app, "environment.tide.state"),
+                    windSpeed: readSelf(
+                      app,
+                      "environment.wind.speedOverGround",
+                    ),
+                    windDirection: readSelf(
+                      app,
+                      "environment.wind.directionTrue",
+                    ),
+                    batterySoc: readSelf(
+                      app,
+                      "electrical.batteries.house.capacity.stateOfCharge",
+                    ),
+                    batteryCurrent: readSelf(
+                      app,
+                      "electrical.batteries.house.current",
+                    ),
+                  },
                 }),
               },
               app.debug,

@@ -724,6 +724,8 @@ test("schema exposes an opt-in NomadNet configuration group", () => {
 
   assert.equal(group.properties.enabled.default, false);
   assert.equal(group.properties.display_name.default, "");
+  assert.equal(group.properties.banner.default, "");
+  assert.equal(group.properties.banner.type, "string");
 });
 
 test("start does not bring up the NomadNet site when disabled", async () => {
@@ -780,6 +782,55 @@ test("the served index page shows the vessel name", async () => {
   const dest = FakeNomadDestination.instances[0];
   const page = await dest.registered[0].options.responseGenerator();
   assert.deepEqual(Buffer.from(page).toString("utf8"), ">>S/Y Bergie\n");
+});
+
+test("the served index page includes live telemetry from Signal K", async () => {
+  const app = makeApp();
+  const paths = {
+    name: { value: "S/Y Bergie" },
+    "navigation.state": { value: "anchored" },
+    "navigation.anchor.distanceFromBow": { value: 12.3 },
+    "environment.depth.belowSurface": { value: 5.2 },
+    "environment.tide.heightNow": { value: 1.3 },
+    "environment.tide.state": { value: "rising" },
+    "environment.wind.speedOverGround": { value: 6.0 },
+    "environment.wind.directionTrue": { value: Math.PI / 4 },
+    "electrical.batteries.house.capacity.stateOfCharge": { value: 0.87 },
+    "electrical.batteries.house.current": { value: 2.3 },
+  };
+  app.getSelfPath = (path) => paths[path];
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+
+  await plugin.start({ nomadnet: { enabled: true } });
+
+  const dest = FakeNomadDestination.instances[0];
+  const page = await dest.registered[0].options.responseGenerator();
+  const text = Buffer.from(page).toString("utf8");
+  assert.match(text, />>S\/Y Bergie/);
+  assert.match(text, />Vessel status/);
+  assert.match(text, /Vessel is anchored/);
+  assert.match(text, /Anchor: 12.3 m from bow/);
+  assert.match(text, /Depth: 5.2 m below surface/);
+  assert.match(text, /Tide: 1.3 m, rising/);
+  assert.match(text, /Wind: 12 kn at 45\u00B0/);
+  assert.match(text, /Battery: 87 %, 2.3 A/);
+});
+
+test("the served index page uses the configured banner when set", async () => {
+  const app = makeApp();
+  app.getSelfPath = (path) =>
+    path === "name" ? { value: "S/Y Bergie" } : undefined;
+  const plugin = makePlugin(app);
+  FakeNomadDestination.instances.length = 0;
+
+  await plugin.start({ nomadnet: { enabled: true, banner: "/|__\n\\__/" } });
+
+  const dest = FakeNomadDestination.instances[0];
+  const page = await dest.registered[0].options.responseGenerator();
+  const text = Buffer.from(page).toString("utf8");
+  assert.ok(text.startsWith("/|__\n\\__/"), "banner shown at the top");
+  assert.doesNotMatch(text, /S\/Y Bergie/);
 });
 
 test("stop deregisters the NomadNet site", async () => {

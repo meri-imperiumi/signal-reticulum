@@ -36,21 +36,180 @@ const INDEX_PATH = "/page/index.mu";
 /** Heading shown when no vessel name is known yet. */
 const UNKNOWN_VESSEL = "Unknown vessel";
 
+/** Multiplier converting metres/second to knots (1 m/s ≈ 1.9438 kn). */
+const MS_TO_KNOTS = 1.9438444924406046;
+/** Multiplier converting radians to degrees. */
+const RAD_TO_DEG = 180 / Math.PI;
+
+/** Section header used for the telemetry block when readings are available. */
+const TELEMETRY_SECTION = ">Vessel status";
+
+/**
+ * Coerces a Signal K self-path value into a finite number, tolerating plain
+ * numbers and `{value}` update wrappers. Returns `undefined` for missing,
+ * non-numeric or non-finite values so callers can omit the field.
+ *
+ * @param {unknown} value
+ * @returns {number|undefined}
+ */
+function readNumber(value) {
+  if (value && typeof value === "object" && "value" in value) {
+    value = value.value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+/**
+ * Renders the navigation.state line as "Vessel is <state>".
+ *
+ * @param {unknown} state - Value at `navigation.state` (e.g. "anchored").
+ * @returns {string} Empty when no state is reported.
+ */
+function formatVesselState(state) {
+  const s = readString(state);
+  return s ? `Vessel is ${s}` : "";
+}
+
+/**
+ * Renders the anchor watch distance as "Anchor: 12.5 m from bow".
+ *
+ * @param {unknown} distance - Value at `navigation.anchor.distanceFromBow` (m).
+ * @returns {string} Empty when no distance is reported.
+ */
+function formatAnchorDistance(distance) {
+  const d = readNumber(distance);
+  return d === undefined ? "" : `Anchor: ${d.toFixed(1)} m from bow`;
+}
+
+/**
+ * Renders the water depth as "Depth: 5.2 m below surface".
+ *
+ * @param {unknown} depth - Value at `environment.depth.belowSurface` (m).
+ * @returns {string} Empty when no depth is reported.
+ */
+function formatDepth(depth) {
+  const d = readNumber(depth);
+  return d === undefined ? "" : `Depth: ${d.toFixed(1)} m below surface`;
+}
+
+/**
+ * Renders the tide as "Tide: 1.3 m, rising". Either part may be absent.
+ *
+ * @param {unknown} height - Value at `environment.tide.heightNow` (m).
+ * @param {unknown} state - Value at `environment.tide.state` (e.g. "rising").
+ * @returns {string} Empty when neither height nor state is reported.
+ */
+function formatTide(height, state) {
+  const h = readNumber(height);
+  const s = readString(state);
+  if (h === undefined && !s) {
+    return "";
+  }
+  const parts = [];
+  if (h !== undefined) {
+    parts.push(`${h.toFixed(1)} m`);
+  }
+  if (s) {
+    parts.push(s);
+  }
+  return `Tide: ${parts.join(", ")}`;
+}
+
+/**
+ * Renders the wind as "Wind: 12 kn at 45°", converting m/s → knots and
+ * radians → degrees. Either part may be absent.
+ *
+ * @param {unknown} speedMs - Value at `environment.wind.speedOverGround` (m/s).
+ * @param {unknown} directionRad - Value at `environment.wind.directionTrue` (rad).
+ * @returns {string} Empty when neither speed nor direction is reported.
+ */
+function formatWind(speedMs, directionRad) {
+  const speed = readNumber(speedMs);
+  const dir = readNumber(directionRad);
+  if (speed === undefined && dir === undefined) {
+    return "";
+  }
+  const parts = [];
+  if (speed !== undefined) {
+    parts.push(`${Math.round(speed * MS_TO_KNOTS)} kn`);
+  }
+  if (dir !== undefined) {
+    parts.push(`${Math.round(dir * RAD_TO_DEG)}\u00B0`);
+  }
+  return `Wind: ${parts.join(" at ")}`;
+}
+
+/**
+ * Renders the house battery as "Battery: 87 %, 2.3 A", converting the state of
+ * charge from a 0–1 decimal to a percentage. Either part may be absent.
+ *
+ * @param {unknown} stateOfCharge - Value at
+ *   `electrical.batteries.house.capacity.stateOfCharge` (0–1).
+ * @param {unknown} current - Value at `electrical.batteries.house.current` (A).
+ * @returns {string} Empty when neither charge nor current is reported.
+ */
+function formatBattery(stateOfCharge, current) {
+  const soc = readNumber(stateOfCharge);
+  const cur = readNumber(current);
+  if (soc === undefined && cur === undefined) {
+    return "";
+  }
+  const parts = [];
+  if (soc !== undefined) {
+    parts.push(`${Math.round(soc * 100)} %`);
+  }
+  if (cur !== undefined) {
+    parts.push(`${cur.toFixed(1)} A`);
+  }
+  return `Battery: ${parts.join(", ")}`;
+}
+
 /**
  * Renders the `/page/index.mu` micron page for the given context.
  *
- * Currently just the vessel name as a micron heading (a line beginning with
- * `>` is a NomadNet section header; the page body is plain micron markup the
- * client renders). The context is evaluated per-request so live values can be
- * added in later steps.
+ * The page starts with a banner: a configurable ASCII/micron banner when
+ * `context.banner` is set, otherwise the vessel name as a micron heading (a
+ * line beginning with `>` is a NomadNet section header). When any telemetry is
+ * available a ">Vessel status" section is appended with one plain line per
+ * reading (state, anchor, depth, tide, wind, battery); absent readings are
+ * omitted so the page never shows empty placeholders.
  *
- * @param {{vesselName?: unknown}|undefined} [context]
+ * The context is evaluated per-request so live values stay current.
+ *
+ * @param {object} [context]
+ * @param {unknown} [context.vesselName] - Value at `vessels.self.name`.
+ * @param {unknown} [context.banner] - Optional multi-line ASCII/micron banner.
+ * @param {object} [context.telemetry] - Raw Signal K self-path values.
  * @returns {string} Micron markup.
  */
 function renderPage(context = {}) {
-  const raw = context && context.vesselName;
-  const name = readString(raw) || UNKNOWN_VESSEL;
-  return `>>${name}\n`;
+  const cfg = context || {};
+  const lines = [];
+
+  const banner = readString(cfg.banner);
+  const name = readString(cfg.vesselName) || UNKNOWN_VESSEL;
+  lines.push(banner ? banner : `>>${name}`);
+
+  const tel = cfg.telemetry || {};
+  const body = [
+    formatVesselState(tel.state),
+    formatAnchorDistance(tel.anchorDistance),
+    formatDepth(tel.depth),
+    formatTide(tel.tideHeight, tel.tideState),
+    formatWind(tel.windSpeed, tel.windDirection),
+    formatBattery(tel.batterySoc, tel.batteryCurrent),
+  ].filter((line) => line && line.trim() !== "");
+
+  if (body.length) {
+    lines.push("");
+    lines.push(TELEMETRY_SECTION);
+    lines.push(...body);
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 /**
@@ -67,8 +226,10 @@ function renderPage(context = {}) {
  * @param {object} [options]
  * @param {string} [options.displayName] - Node name announced in app_data
  *   (defaults to "Signal K").
- * @param {() => {vesselName?: unknown}} [options.getContext] - Called on each
- *   page request to build the render context, so the page stays live.
+ * @param {() => {vesselName?: unknown, banner?: unknown, telemetry?: object}}
+ *   [options.getContext] - Called on each page request to build the render
+ *   context (vessel name, optional banner, raw telemetry values), so the page
+ *   stays live.
  * @param {(...args:any[])=>void} [log]
  * @returns {Promise<object>} The NomadNet site handle.
  */
@@ -194,7 +355,17 @@ module.exports = {
   NODE_ASPECT,
   INDEX_PATH,
   UNKNOWN_VESSEL,
+  MS_TO_KNOTS,
+  RAD_TO_DEG,
+  TELEMETRY_SECTION,
   setupNomadNet,
   renderPage,
   readString,
+  readNumber,
+  formatVesselState,
+  formatAnchorDistance,
+  formatDepth,
+  formatTide,
+  formatWind,
+  formatBattery,
 };
