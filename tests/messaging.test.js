@@ -139,6 +139,7 @@ test("makeTelemetryDeliverer builds an LXMessage carrying FIELD_TELEMETRY with a
   const identity = { id: "me" };
   deps.LXMessage = FakeLXMessage;
   deps.FIELD_TELEMETRY = 0x02;
+  deps.FIELD_ICON_APPEARANCE = 0x04;
   deps.fromHex = (hex) => Buffer.from(hex, "hex");
 
   const deliverTelemetry = makeTelemetryDeliverer(router, identity);
@@ -152,6 +153,40 @@ test("makeTelemetryDeliverer builds an LXMessage carrying FIELD_TELEMETRY with a
   assert.equal(message.options.content, "");
   assert.ok(message.options.fields instanceof Map);
   assert.equal(message.options.fields.get(0x02), packed);
+  // No appearance supplied -> no icon field.
+  assert.equal(message.options.fields.has(0x04), false);
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeTelemetryDeliverer attaches the FIELD_ICON_APPEARANCE field alongside telemetry", async () => {
+  const router = new FakeLxmRouter({}, {});
+  const identity = { id: "me" };
+  deps.LXMessage = FakeLXMessage;
+  deps.FIELD_TELEMETRY = 0x02;
+  deps.FIELD_ICON_APPEARANCE = 0x04;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const deliverTelemetry = makeTelemetryDeliverer(router, identity, {
+    icon: "sail-boat",
+    fg: [0, 0, 0],
+    bg: [255, 255, 255],
+  });
+  const packed = new Uint8Array([1, 2, 3]);
+  await deliverTelemetry("0123456789abcdef0123456789abcdef", packed);
+
+  const { message } = router.sent[0];
+  const fields = message.options.fields;
+  // Telemetry is preserved.
+  assert.equal(fields.get(0x02), packed);
+  // Appearance rides along as [str, Uint8Array(3), Uint8Array(3)].
+  const appearance = fields.get(0x04);
+  assert.ok(appearance, "appearance field present");
+  assert.equal(appearance[0], "sail-boat");
+  assert.ok(appearance[1] instanceof Uint8Array);
+  assert.ok(appearance[2] instanceof Uint8Array);
+  assert.deepEqual(Array.from(appearance[1]), [0, 0, 0]);
+  assert.deepEqual(Array.from(appearance[2]), [255, 255, 255]);
 
   Object.assign(deps, REAL_DEPS);
 });

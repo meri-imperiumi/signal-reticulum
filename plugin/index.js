@@ -21,6 +21,7 @@ const { setupNomadNet } = require("./nomadnet");
 const { readNumber, readPosition, readString } = require("./nomadnet");
 const compression = require("./compression");
 const { resolveDisplayName } = require("./displayname");
+const { resolveAppearance } = require("./appearance");
 const { createStorageAdapter, setupCrewPersistence } = require("./storage");
 const { effectiveCrew } = require("./notifications");
 const { buildTelemetrySensors, packTelemetry } = require("./telemetry");
@@ -356,9 +357,24 @@ module.exports = (app) => {
             app.debug,
           );
           deliver = makeDeliverer(plugin.lxmf, plugin.identity, app.debug);
+          // Resolve the node's icon/colors once at startup (the vessel's AIS
+          // ship type rarely changes) so every telemetry broadcast advertises
+          // the same recognisable avatar to crew members' devices.
+          const appearance = resolveAppearance({
+            icon: config && config.appearance && config.appearance.icon,
+            fgColor: config && config.appearance && config.appearance.fg_color,
+            bgColor: config && config.appearance && config.appearance.bg_color,
+            aisShipType: readSelf(app, "design.aisShipType"),
+          });
+          app.debug(
+            `Node appearance: icon=${appearance.icon}, fg=[${appearance.fg.join(
+              ",",
+            )}], bg=[${appearance.bg.join(",")}]`,
+          );
           deliverTelemetry = makeTelemetryDeliverer(
             plugin.lxmf,
             plugin.identity,
+            appearance,
           );
 
           // Handle incoming LXMF messages (ping/pong, and future commands)

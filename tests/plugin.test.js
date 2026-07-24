@@ -318,6 +318,7 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
     "crew",
     "nomadnet",
     "telemetry",
+    "appearance",
   ]);
   const identity = schema.properties.identity;
   assert.ok("publicKey" in identity.properties);
@@ -819,6 +820,95 @@ test("start schedules and fires a telemetry broadcast to the crew when enabled",
       router.sent[0].message.options.destinationHash,
       Buffer.from(dest, "hex"),
     );
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+    globalThis.setInterval = origSetInterval;
+    await plugin.stop();
+  }
+});
+
+test("telemetry broadcast carries the derived appearance (icon + colors)", async () => {
+  const app = makeApp();
+  app.getSelfPath = (p) => {
+    if (p === "navigation.position") return { latitude: 1, longitude: 2 };
+    // AIS ship type 36 = Sailing.
+    if (p === "design.aisShipType")
+      return { value: { id: 36, name: "Sailing" } };
+    return undefined;
+  };
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+
+  const scheduled = [];
+  const origSetTimeout = globalThis.setTimeout;
+  const origSetInterval = globalThis.setInterval;
+  globalThis.setTimeout = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  globalThis.setInterval = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  try {
+    await plugin.start({
+      telemetry: { enabled: true, interval_seconds: 30 },
+      appearance: { icon: "", fg_color: "#ffffff", bg_color: "#1a237e" },
+      crew: [{ name: "Alice", destination: dest }],
+    });
+
+    await scheduled[0]();
+
+    const fields = plugin.lxmf.sent[0].message.options.fields;
+    const appearance = fields.get(0x04);
+    assert.ok(appearance, "FIELD_ICON_APPEARANCE present on the wire");
+    // Sailing vessel (AIS 36) with no explicit icon -> sail-boat.
+    assert.equal(appearance[0], "sail-boat");
+    // Colors are 3-byte bin payloads (Uint8Array), not int arrays.
+    assert.ok(appearance[1] instanceof Uint8Array, "fg is a byte string");
+    assert.ok(appearance[2] instanceof Uint8Array, "bg is a byte string");
+    assert.deepEqual(Array.from(appearance[1]), [255, 255, 255]);
+    assert.deepEqual(Array.from(appearance[2]), [26, 35, 126]);
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+    globalThis.setInterval = origSetInterval;
+    await plugin.stop();
+  }
+});
+
+test("telemetry broadcast uses the ferry icon for a motor vessel", async () => {
+  const app = makeApp();
+  app.getSelfPath = (p) => {
+    if (p === "navigation.position") return { latitude: 1, longitude: 2 };
+    // AIS ship type 37 = Pleasure craft (motor).
+    if (p === "design.aisShipType")
+      return { value: { id: 37, name: "Pleasure" } };
+    return undefined;
+  };
+  const plugin = makePlugin(app);
+  const dest = "0123456789abcdef0123456789abcdef";
+
+  const scheduled = [];
+  const origSetTimeout = globalThis.setTimeout;
+  const origSetInterval = globalThis.setInterval;
+  globalThis.setTimeout = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  globalThis.setInterval = (fn) => {
+    scheduled.push(fn);
+    return 0;
+  };
+  try {
+    await plugin.start({
+      telemetry: { enabled: true, interval_seconds: 30 },
+      crew: [{ name: "Alice", destination: dest }],
+    });
+
+    await scheduled[0]();
+
+    const fields = plugin.lxmf.sent[0].message.options.fields;
+    assert.equal(fields.get(0x04)[0], "ferry");
   } finally {
     globalThis.setTimeout = origSetTimeout;
     globalThis.setInterval = origSetInterval;

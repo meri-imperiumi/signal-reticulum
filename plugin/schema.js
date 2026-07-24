@@ -332,6 +332,52 @@ function buildPluginSchema(interfaces) {
         },
         additionalProperties: false,
       },
+      appearance: {
+        type: "object",
+        title: "Appearance",
+        description:
+          "Icon and colors advertised to LXMF peers (Sideband, MeshChat) so " +
+          "crew members' devices show a recognisable avatar for this node " +
+          "alongside its telemetry. The icon is a Material Design Icon name " +
+          "(e.g. 'sail-boat', 'ferry', 'anchor'); the colors are RGB hex " +
+          "strings. The appearance is carried in the LXMF " +
+          "FIELD_ICON_APPEARANCE message field and sent with each telemetry " +
+          "broadcast, so telemetry broadcast must be enabled for peers to " +
+          "receive it. When the icon is left empty it is derived from the " +
+          "vessel's AIS ship type (design.aisShipType): a sail-boat icon for " +
+          "sailing vessels, a ferry icon for everything else.",
+        properties: {
+          icon: {
+            type: "string",
+            title: "Icon",
+            description:
+              "Material Design Icon name shown as this node's avatar on " +
+              "peers' devices. Leave empty to derive automatically from the " +
+              "vessel's AIS ship type (sail-boat for sailing vessels, ferry " +
+              "otherwise).",
+            default: "",
+          },
+          fg_color: {
+            type: "string",
+            title: "Foreground color",
+            description:
+              "Icon/foreground color as an RGB hex string (e.g. '#ffffff'). " +
+              "Used by peers to tint the node's avatar.",
+            format: "color",
+            default: "#ffffff",
+          },
+          bg_color: {
+            type: "string",
+            title: "Background color",
+            description:
+              "Background color behind the icon, as an RGB hex string " +
+              "(e.g. '#1a237e').",
+            format: "color",
+            default: "#1a237e",
+          },
+        },
+        additionalProperties: false,
+      },
     },
   };
 }

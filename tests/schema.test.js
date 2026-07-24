@@ -119,7 +119,7 @@ test("buildPluginSchema places one instance array per non-excluded interface bet
   // Non-interface groups bookend the interface arrays.
   assert.equal(keys[0], "log_level");
   assert.equal(keys[1], "use_shared_instance");
-  assert.equal(keys[keys.length - 1], "telemetry");
+  assert.equal(keys[keys.length - 1], "appearance");
 
   // The interface arrays land between use_shared_instance and identity, in
   // registry order, excluding WebRTC.
@@ -136,4 +136,28 @@ test("buildPluginSchema places one instance array per non-excluded interface bet
 test("buildPluginSchema never exposes a WebRTC config array", () => {
   const schema = buildPluginSchema([makeEntry({ id: "webrtc" })]);
   assert.ok(!("webrtc_interfaces" in schema.properties));
+});
+
+test("buildPluginSchema exposes an appearance group with icon + hex colors", () => {
+  const schema = buildPluginSchema([]);
+  const appearance = schema.properties.appearance;
+
+  assert.equal(appearance.type, "object");
+  assert.equal(appearance.additionalProperties, false);
+  assert.deepEqual(Object.keys(appearance.properties), [
+    "icon",
+    "fg_color",
+    "bg_color",
+  ]);
+
+  // The icon defaults to empty so it is derived from the AIS ship type.
+  assert.equal(appearance.properties.icon.type, "string");
+  assert.equal(appearance.properties.icon.default, "");
+
+  // Colors default to nautical indigo on white and use the `color` format so
+  // the Signal K config UI renders a colour picker.
+  assert.equal(appearance.properties.fg_color.default, "#ffffff");
+  assert.equal(appearance.properties.bg_color.default, "#1a237e");
+  assert.equal(appearance.properties.fg_color.format, "color");
+  assert.equal(appearance.properties.bg_color.format, "color");
 });

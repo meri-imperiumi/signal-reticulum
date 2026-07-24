@@ -17,12 +17,15 @@
 
 const RNS = require("@reticulum/core");
 
+const { withAppearance } = require("./appearance");
+
 /** Injected transport classes; tests swap these for fakes. */
 const deps = {
   LXMRouter: RNS.LXMRouter,
   LXMessage: RNS.LXMessage,
   Destination: RNS.Destination,
   FIELD_TELEMETRY: RNS.LXMFConstants.FIELD_TELEMETRY,
+  FIELD_ICON_APPEARANCE: RNS.LXMFConstants.FIELD_ICON_APPEARANCE,
   fromHex: RNS.fromHex,
   toHex: RNS.toHex,
 };
@@ -140,21 +143,30 @@ function makeDeliverer(lxmf, identity, debug = () => {}) {
  * The `fields` map uses an integer key (via `Map`) so it is serialised with an
  * integer field id on the wire, exactly as Sideband expects.
  *
+ * When an `appearance` (icon + colors) is supplied it is merged into the same
+ * message's `FIELD_ICON_APPEARANCE` field, so peers render the boat's avatar
+ * alongside the telemetry — the same coupling Sideband uses
+ * (`telemetry_send_appearance`). See `appearance.js` for the wire shape.
+ *
  * Rejects if the recipient's identity is unknown or delivery fails; the caller
  * logs and continues with the next recipient.
  *
  * @param {object} lxmf - An initialised LXMRouter.
  * @param {object} identity - The sender Reticulum identity.
+ * @param {{icon?:string, fg?:[number,number,number], bg?:[number,number,number]}|null} [appearance]
+ *   Resolved node appearance to advertise with each telemetry message.
  * @returns {(destinationHashHex:string, packedTelemetry:Uint8Array)=>Promise<void>}
  */
-function makeTelemetryDeliverer(lxmf, identity) {
+function makeTelemetryDeliverer(lxmf, identity, appearance) {
   return async function deliverTelemetry(destinationHashHex, packedTelemetry) {
+    const base = new Map([[deps.FIELD_TELEMETRY, packedTelemetry]]);
+    const fields = withAppearance(base, appearance, deps.FIELD_ICON_APPEARANCE);
     const message = new deps.LXMessage({
       sourceHash: lxmf.deliveryDest.destinationHash,
       destinationHash: deps.fromHex(destinationHashHex),
       title: "",
       content: "",
-      fields: new Map([[deps.FIELD_TELEMETRY, packedTelemetry]]),
+      fields,
     });
     await lxmf.send(message, identity);
   };
