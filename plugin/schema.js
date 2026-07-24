@@ -2,11 +2,14 @@
  * Builds the Signal K plugin configuration JSON Schema for the Reticulum
  * integration from the available Reticulum interfaces.
  *
- * The schema is split into groups (currently only `interfaces`); the
- * `interfaces` group is an array where each item may be any registered
- * interface type, identified by a `type` discriminator holding the stable
- * registry id (e.g. "tcp-client"). This allows multiple instances of any
- * interface type to be configured.
+ * The schema exposes one top-level array per configurable Reticulum interface
+ * type (e.g. `tcp_clients`, `auto_interfaces`), so each type's options are a
+ * plain list of same-shaped objects the config UI can render and validate on
+ * its own — there is no discriminated union, so adding an entry never produces
+ * validation errors for the other interface types. Interface types that cannot
+ * run on the server (browser-only; see {@link EXCLUDED_INTERFACE_IDS}) are
+ * omitted. When no interfaces are configured at all, an AutoInterface
+ * (zero-config LAN/Wi-Fi peering) is started by default.
  *
  * @file schema.js
  */
@@ -19,53 +22,86 @@
  */
 
 /**
- * The discriminator property name added to every wrapped interface schema so
- * the UI can tell configured interfaces apart and pick the matching branch.
+ * Interface registry ids that are not configurable from the Signal K server.
+ * `webrtc` is browser-only (it needs the browser's WebRTC stack), so it is
+ * hidden from the config UI and never started here.
  */
-const TYPE_DISCRIMINATOR = "type";
+const EXCLUDED_INTERFACE_IDS = ["webrtc"];
 
 /**
- * Wraps a single interface's own configuration schema so it can be used as a
- * `oneOf` branch inside the `interfaces` array.
+ * Derives the plugin config key for one interface type's instance array from
+ * its stable registry id. Used by both the generated schema and the config
+ * reader, so the two can never drift apart.
  *
- * A `type` discriminator property (set as a `const` to the interface's stable
- * registry id) is merged in alongside the interface's own properties, and the
- * interface's `required`/`additionalProperties` constraints are preserved.
+ * `tcp-client` → `tcp_clients`, `tcp-server` → `tcp_servers`, `auto` →
+ * `auto_interfaces`. Client/server ids pluralise their last segment; every
+ * other id takes an `_interfaces` suffix.
+ *
+ * @param {string} id - Stable interface registry id.
+ * @returns {string}
+ */
+function configKeyFor(id) {
+  const parts = id.split("-");
+  const last = parts[parts.length - 1];
+  if (last === "client") {
+    return parts.slice(0, -1).concat(["clients"]).join("_");
+  }
+  if (last === "server") {
+    return parts.slice(0, -1).concat(["servers"]).join("_");
+  }
+  return `${id.replace(/-/g, "_")}_interfaces`;
+}
+
+/**
+ * Builds the JSON Schema for one interface type's instance array: a plain
+ * `array` of that type's own option objects, passing the interface's own
+ * properties, required fields and `additionalProperties` stance straight
+ * through. Each item is one configured instance, so any number of instances of
+ * a type may be added.
  *
  * @param {InterfaceRegistryEntry} entry
- * @returns {Record<string, any>} A JSON Schema object suitable for a `oneOf` branch.
+ * @returns {Record<string, any>}
  */
-function wrapInterfaceSchema(entry) {
+function buildInterfaceArray(entry) {
   const schema = entry.schema || {};
-  const properties = {
-    [TYPE_DISCRIMINATOR]: {
-      type: "string",
-      title: "Interface type",
-      const: entry.id,
-      default: entry.id,
-      description: `The Reticulum interface type ("${entry.id}").`,
-    },
-    ...(schema.properties || {}),
-  };
-  const required = Array.from(
-    new Set([TYPE_DISCRIMINATOR, ...(schema.required || [])]),
-  );
+  const name = entry.name || entry.id;
+  const arrayTitle = name.endsWith("s") ? `${name}es` : `${name}s`;
   /** @type {Record<string, any>} */
-  const wrapped = {
+  const items = {
     type: "object",
-    title: entry.name,
-    properties,
-    required,
+    title: name,
+    properties: schema.properties || {},
+    required: schema.required || [],
   };
   if (schema.description) {
-    wrapped.description = schema.description;
+    items.description = schema.description;
   }
-  // Preserve the interface's own additionalProperties stance (e.g. `false`
-  // from strict schemas) so adding the discriminator doesn't loosen validation.
   if (schema.additionalProperties !== undefined) {
-    wrapped.additionalProperties = schema.additionalProperties;
+    items.additionalProperties = schema.additionalProperties;
   }
-  return wrapped;
+  return {
+    type: "array",
+    title: arrayTitle,
+    items,
+  };
+}
+
+/**
+ * Builds the per-interface-type array properties for the plugin schema,
+ * skipping {@link EXCLUDED_INTERFACE_IDS}.
+ *
+ * @param {InterfaceRegistryEntry[]} interfaces
+ * @returns {Record<string, any>}
+ */
+function buildInterfaceArrays(interfaces) {
+  const arrays = {};
+  for (const entry of interfaces) {
+    if (EXCLUDED_INTERFACE_IDS.includes(entry.id)) {
+      continue;
+    }
+    arrays[configKeyFor(entry.id)] = buildInterfaceArray(entry);
+  }
+  return arrays;
 }
 
 /**
@@ -74,10 +110,9 @@ function wrapInterfaceSchema(entry) {
  * @param {InterfaceRegistryEntry[]} interfaces - Entries from
  *   `@reticulum/node`'s `listInterfaces()`.
  * @returns {Record<string, any>} A JSON Schema (draft-07) object describing the
- *   plugin configuration, with Reticulum interfaces grouped under `interfaces`.
+ *   plugin configuration.
  */
 function buildPluginSchema(interfaces) {
-  const branches = interfaces.map(wrapInterfaceSchema);
   return {
     $schema: "http://json-schema.org/draft-07/schema#",
     type: "object",
@@ -114,19 +149,7 @@ function buildPluginSchema(interfaces) {
           "falls back to the configured interfaces.",
         default: true,
       },
-      interfaces: {
-        type: "array",
-        title: "Reticulum interfaces",
-        description:
-          "Reticulum network interfaces to start. Any number of instances " +
-          "of any available interface type may be added. When none are " +
-          "configured, an AutoInterface (zero-config LAN/Wi-Fi peering) is " +
-          "started by default.",
-        default: [{ type: "auto" }],
-        items: {
-          oneOf: branches,
-        },
-      },
+      ...buildInterfaceArrays(interfaces),
       identity: {
         type: "object",
         title: "Identity",
@@ -314,7 +337,9 @@ function buildPluginSchema(interfaces) {
 }
 
 module.exports = {
-  TYPE_DISCRIMINATOR,
-  wrapInterfaceSchema,
+  EXCLUDED_INTERFACE_IDS,
+  configKeyFor,
+  buildInterfaceArray,
+  buildInterfaceArrays,
   buildPluginSchema,
 };

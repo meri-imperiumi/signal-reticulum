@@ -10,9 +10,10 @@ const {
   listInterfaces,
   LocalClientInterface,
 } = require("@reticulum/node");
-const { buildPluginSchema } = require("./schema");
+const { buildPluginSchema, EXCLUDED_INTERFACE_IDS } = require("./schema");
 const { resolveIdentity } = require("./identity");
-const { effectiveInterfaces, setupInterfaces } = require("./interfaces");
+const { effectiveInterfaces, setupInterfaces, interfacesFromConfig } =
+  require("./interfaces");
 const { sendNotification } = require("./notifications");
 const { setupMessaging, makeDeliverer, makeTelemetryDeliverer } =
   require("./messaging");
@@ -309,7 +310,12 @@ module.exports = (app) => {
 
         let setupErrors = [];
         if (!usedSharedInstance) {
-          const list = effectiveInterfaces(config && config.interfaces);
+          const configurableIds = listInterfaces()
+            .map((entry) => entry.id)
+            .filter((id) => !EXCLUDED_INTERFACE_IDS.includes(id));
+          const list = effectiveInterfaces(
+            interfacesFromConfig(config, configurableIds),
+          );
           const defaulted = list.every(
             (entry) => entry && entry.type === "auto",
           );

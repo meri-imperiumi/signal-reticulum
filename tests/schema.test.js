@@ -3,8 +3,10 @@ const assert = require("node:assert/strict");
 
 const {
   buildPluginSchema,
-  wrapInterfaceSchema,
-  TYPE_DISCRIMINATOR,
+  buildInterfaceArray,
+  buildInterfaceArrays,
+  configKeyFor,
+  EXCLUDED_INTERFACE_IDS,
 } = require("../plugin/schema");
 
 /**
@@ -31,90 +33,107 @@ function makeEntry(overrides = {}) {
   };
 }
 
-test("buildPluginSchema returns a draft-07 object schema with the interfaces group", () => {
+test("configKeyFor pluralises client/server ids and suffixes the rest", () => {
+  assert.equal(configKeyFor("tcp-client"), "tcp_clients");
+  assert.equal(configKeyFor("tcp-server"), "tcp_servers");
+  assert.equal(configKeyFor("http-client"), "http_clients");
+  assert.equal(configKeyFor("local-client"), "local_clients");
+  assert.equal(configKeyFor("ws-client"), "ws_clients");
+  assert.equal(configKeyFor("auto"), "auto_interfaces");
+  assert.equal(configKeyFor("webrtc"), "webrtc_interfaces");
+});
+
+test("EXCLUDED_INTERFACE_IDS hides the browser-only WebRTC interface", () => {
+  assert.ok(EXCLUDED_INTERFACE_IDS.includes("webrtc"));
+});
+
+test("buildInterfaceArray wraps one type's options as a plain instance array", () => {
+  const array = buildInterfaceArray(makeEntry({ name: "Fake Interface" }));
+
+  assert.equal(array.type, "array");
+  // The array title is the interface name pluralised.
+  assert.equal(array.title, "Fake Interfaces");
+  assert.equal(array.items.type, "object");
+  assert.equal(array.items.title, "Fake Interface");
+  assert.equal(array.items.description, "A fake interface for testing.");
+  assert.equal(array.items.additionalProperties, false);
+  assert.deepEqual(array.items.required, ["host"]);
+  assert.ok("host" in array.items.properties);
+  assert.ok("name" in array.items.properties);
+});
+
+test("buildInterfaceArray appends -es when the interface name ends in s", () => {
+  const array = buildInterfaceArray(makeEntry({ name: "Bus" }));
+  assert.equal(array.title, "Buses");
+});
+
+test("buildInterfaceArray omits items.description when the schema has none", () => {
+  const array = buildInterfaceArray({
+    id: "bare",
+    name: "Bare",
+    schema: { properties: {}, required: [] },
+  });
+  assert.equal("description" in array.items, false);
+});
+
+test("buildInterfaceArray omits items.additionalProperties when the schema has none", () => {
+  const array = buildInterfaceArray({
+    id: "loose",
+    name: "Loose",
+    schema: { properties: { host: { type: "string" } } },
+  });
+  assert.equal("additionalProperties" in array.items, false);
+});
+
+test("buildInterfaceArrays exposes one array per interface except the excluded ones", () => {
+  const arrays = buildInterfaceArrays([
+    makeEntry({ id: "auto", name: "AutoInterface" }),
+    makeEntry({ id: "tcp-client", name: "TCP Client Interface" }),
+    makeEntry({ id: "webrtc", name: "WebRTC Interface" }),
+  ]);
+
+  assert.deepEqual(Object.keys(arrays).sort(), [
+    "auto_interfaces",
+    "tcp_clients",
+  ]);
+  assert.ok(!("webrtc_interfaces" in arrays));
+});
+
+test("buildPluginSchema returns a draft-07 object schema", () => {
   const schema = buildPluginSchema([]);
 
   assert.equal(schema.$schema, "http://json-schema.org/draft-07/schema#");
   assert.equal(schema.type, "object");
   assert.equal(schema.title, "Signal K Reticulum");
-  assert.deepEqual(Object.keys(schema.properties), [
-    "log_level",
-    "use_shared_instance",
-    "interfaces",
-    "identity",
-    "messaging",
-    "crew",
-    "nomadnet",
-    "telemetry",
-  ]);
-  assert.equal(schema.properties.interfaces.type, "array");
-  assert.equal(schema.properties.interfaces.items.oneOf.length, 0);
 });
 
-test("buildPluginSchema creates one oneOf branch per provided interface", () => {
+test("buildPluginSchema places one instance array per non-excluded interface between use_shared_instance and identity", () => {
   const entries = [
-    makeEntry({ id: "a", name: "A" }),
-    makeEntry({ id: "b", name: "B" }),
+    makeEntry({ id: "auto", name: "AutoInterface" }),
+    makeEntry({ id: "tcp-client", name: "TCP Client Interface" }),
+    makeEntry({ id: "webrtc", name: "WebRTC Interface" }),
   ];
-  const items = buildPluginSchema(entries).properties.interfaces.items;
+  const schema = buildPluginSchema(entries);
+  const keys = Object.keys(schema.properties);
 
-  assert.equal(items.oneOf.length, 2);
+  // Non-interface groups bookend the interface arrays.
+  assert.equal(keys[0], "log_level");
+  assert.equal(keys[1], "use_shared_instance");
+  assert.equal(keys[keys.length - 1], "telemetry");
+
+  // The interface arrays land between use_shared_instance and identity, in
+  // registry order, excluding WebRTC.
+  const ifaceKeys = keys.slice(2, keys.indexOf("identity"));
+  assert.deepEqual(ifaceKeys, ["auto_interfaces", "tcp_clients"]);
+
+  // Each array carries its interface's required fields.
+  assert.deepEqual(
+    schema.properties.tcp_clients.items.required,
+    entries[1].schema.required,
+  );
 });
 
-test("the interfaces group defaults to AutoInterface", () => {
-  const schema = buildPluginSchema([makeEntry()]);
-  assert.deepEqual(schema.properties.interfaces.default, [{ type: "auto" }]);
-});
-
-test("wrapInterfaceSchema adds a type discriminator set to the registry id", () => {
-  const wrapped = wrapInterfaceSchema(makeEntry({ id: "tcp-client" }));
-
-  const disc = wrapped.properties[TYPE_DISCRIMINATOR];
-  assert.equal(disc.type, "string");
-  assert.equal(disc.const, "tcp-client");
-  assert.equal(disc.default, "tcp-client");
-});
-
-test("wrapInterfaceSchema puts type first in required and keeps the interface required fields", () => {
-  const wrapped = wrapInterfaceSchema(makeEntry({ id: "fake" }));
-
-  assert.equal(wrapped.required[0], TYPE_DISCRIMINATOR);
-  assert.deepEqual(wrapped.required, ["type", "host"]);
-});
-
-test("wrapInterfaceSchema preserves the interface's own properties", () => {
-  const wrapped = wrapInterfaceSchema(makeEntry());
-
-  assert.ok("name" in wrapped.properties);
-  assert.ok("host" in wrapped.properties);
-});
-
-test("wrapInterfaceSchema preserves additionalProperties:false from strict schemas", () => {
-  const wrapped = wrapInterfaceSchema(makeEntry());
-  assert.equal(wrapped.additionalProperties, false);
-});
-
-test("wrapInterfaceSchema omits additionalProperties when the source omits it", () => {
-  const schema = { type: "object", properties: { host: { type: "string" } } };
-  const wrapped = wrapInterfaceSchema({ id: "loose", name: "Loose", schema });
-  assert.equal("additionalProperties" in wrapped, false);
-});
-
-test("wrapInterfaceSchema keeps the interface title and description", () => {
-  const wrapped = wrapInterfaceSchema(makeEntry({ name: "My Iface" }));
-  assert.equal(wrapped.title, "My Iface");
-  assert.equal(wrapped.description, "A fake interface for testing.");
-});
-
-test("wrapInterfaceSchema does not duplicate type when an interface already lists it as required", () => {
-  const entry = makeEntry({
-    id: "fake",
-    schema: {
-      type: "object",
-      properties: { host: { type: "string" } },
-      required: ["type", "host"],
-    },
-  });
-  const wrapped = wrapInterfaceSchema(entry);
-  assert.deepEqual(wrapped.required, ["type", "host"]);
+test("buildPluginSchema never exposes a WebRTC config array", () => {
+  const schema = buildPluginSchema([makeEntry({ id: "webrtc" })]);
+  assert.ok(!("webrtc_interfaces" in schema.properties));
 });

@@ -1,4 +1,9 @@
 # Changelog
+## Unreleased
+### Changed
+- Reticulum interfaces are no longer configured through a single `interfaces` array of discriminated entries. There is now one top-level array per interface type — e.g. `tcp_clients`, `tcp_servers`, `auto_interfaces`, `http_clients`, `ws_clients` — so the Signal K config UI offers a dedicated "Add …" button per type and renders exactly that type's own fields, and a half-filled entry only ever reports its own missing required options. This replaces the previous single `interfaces` array whose `oneOf` of per-type object schemas made it impossible to add an interface: the live validator checked every branch and surfaced a wall of errors (missing `type` / mismatched `const` / each type's own required fields) the moment a new entry was added, even with the defaults in place. Each type's options, required fields and typo-rejection (`additionalProperties: false`) are passed straight through from the interface's own configuration schema. When no interfaces are configured at all an AutoInterface (zero-config LAN/Wi-Fi peering) is still started by default. A manually-saved config using the old single `interfaces` array is still honoured as a fallback when no per-type arrays are set, so it is not silently lost
+- The browser-only WebRTC interface is hidden from the config UI (and never started on the server); only the interfaces that can actually run under Node.js are exposed
+
 ## [0.1.0] - 2026-07-23
 ### Added
 - Digital switching command: crew members can toggle a Signal K digital switch by texting `turn <switch> on` or `turn <switch> off` over LXMF, which writes the `electrical.switches.<switch>.state` path via `app.putSelfPath`. The command is crew-only and additionally gated by the new `messaging.digital_switching` setting (off by default), so the operator must opt in. A failed put is reported back to the crew instead of being silently dropped, improving on the `signalk-meshtastic` behaviour

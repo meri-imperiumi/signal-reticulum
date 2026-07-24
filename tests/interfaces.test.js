@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   DEFAULT_INTERFACES,
   getDefaultInterfaces,
+  interfacesFromConfig,
   effectiveInterfaces,
   optionsFromEntry,
   setupInterfaces,
@@ -140,4 +141,79 @@ test("setupInterfaces records a connect failure, attempts cleanup, and keeps goi
   assert.match(result.errors[0].error, /Failed to connect "tcp-client"/);
   // The failed interface was cleaned up via disconnect.
   assert.equal(bad.disconnectedByCleanup, undefined); // sanity
+});
+
+test("interfacesFromConfig flattens the per-type arrays into typed entries", () => {
+  const ids = ["auto", "tcp-client"];
+  const config = {
+    auto_interfaces: [{}],
+    tcp_clients: [{ host: "1.2.3.4", port: 4242, name: "uplink" }],
+  };
+
+  assert.deepEqual(interfacesFromConfig(config, ids), [
+    { type: "auto" },
+    { type: "tcp-client", host: "1.2.3.4", port: 4242, name: "uplink" },
+  ]);
+});
+
+test("interfacesFromConfig ignores arrays for ids it was not given", () => {
+  // "webrtc" is browser-only and filtered out before this runs; an entry left
+  // under its key must not be started.
+  const config = {
+    webrtc_interfaces: [{ bitrate: 999 }],
+    tcp_clients: [{ host: "x", port: 1 }],
+  };
+  assert.deepEqual(interfacesFromConfig(config, ["tcp-client"]), [
+    { type: "tcp-client", host: "x", port: 1 },
+  ]);
+});
+
+test("interfacesFromConfig returns an empty list when nothing is configured", () => {
+  assert.deepEqual(interfacesFromConfig(undefined, ["auto"]), []);
+  assert.deepEqual(interfacesFromConfig(null, ["auto"]), []);
+  assert.deepEqual(interfacesFromConfig({}, ["auto"]), []);
+  assert.deepEqual(
+    interfacesFromConfig({ tcp_clients: [] }, ["tcp-client"]),
+    [],
+  );
+});
+
+test("interfacesFromConfig tolerates non-object array entries", () => {
+  assert.deepEqual(
+    interfacesFromConfig(
+      { tcp_clients: [null, "nope", { host: "x", port: 1 }] },
+      ["tcp-client"],
+    ),
+    [
+      { type: "tcp-client" },
+      { type: "tcp-client" },
+      { type: "tcp-client", host: "x", port: 1 },
+    ],
+  );
+});
+
+test("interfacesFromConfig honours a legacy single `interfaces` array only when no per-type arrays are set", () => {
+  const legacy = {
+    interfaces: [{ type: "auto" }, { type: "tcp-client", host: "h", port: 9 }],
+  };
+  assert.deepEqual(interfacesFromConfig(legacy, ["auto", "tcp-client"]), [
+    { type: "auto" },
+    { type: "tcp-client", host: "h", port: 9 },
+  ]);
+
+  // Per-type arrays take precedence over the legacy key.
+  const mixed = {
+    ...legacy,
+    tcp_clients: [{ host: "new", port: 2 }],
+  };
+  assert.deepEqual(interfacesFromConfig(mixed, ["auto", "tcp-client"]), [
+    { type: "tcp-client", host: "new", port: 2 },
+  ]);
+});
+
+test("effectiveInterfaces(interfacesFromConfig(...)) defaults to AutoInterface when nothing is configured", () => {
+  assert.deepEqual(
+    effectiveInterfaces(interfacesFromConfig({}, ["auto", "tcp-client"])),
+    [{ type: "auto" }],
+  );
 });

@@ -10,6 +10,7 @@
  */
 
 const { getInterface: defaultGetInterface } = require("@reticulum/node");
+const { configKeyFor } = require("./schema");
 
 /** Default interfaces applied when none are configured (zero-config peering). */
 const DEFAULT_INTERFACES = Object.freeze([{ type: "auto" }]);
@@ -20,6 +21,51 @@ const DEFAULT_INTERFACES = Object.freeze([{ type: "auto" }]);
  */
 function getDefaultInterfaces() {
   return DEFAULT_INTERFACES.map((entry) => ({ ...entry }));
+}
+
+/**
+ * Flattens the per-interface-type config arrays into the `{type, ...options}`
+ * entry list consumed by {@link setupInterfaces}.
+ *
+ * The plugin schema exposes one array per type (e.g. `tcp_clients`,
+ * `auto_interfaces`); each item is one configured instance of that type. This
+ * tags every item with its `type` (the stable registry id) so the rest of the
+ * setup pipeline keeps working off a single flat list.
+ *
+ * `ids` should be the list of configurable interface ids (i.e. already filtered
+ * of browser-only types such as WebRTC), so a stale entry left under a hidden
+ * type is ignored rather than started.
+ *
+ * For backward compatibility, a legacy single `interfaces` array carrying
+ * explicit `type` discriminators is honoured when no per-type arrays are set,
+ * so a config last saved under the old shape is not silently lost.
+ *
+ * @param {unknown} config
+ * @param {string[]} ids - Configurable interface registry ids.
+ * @returns {object[]}
+ */
+function interfacesFromConfig(config, ids) {
+  if (!config || typeof config !== "object") {
+    return [];
+  }
+  const out = [];
+  for (const id of ids) {
+    const arr = config[configKeyFor(id)];
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        out.push({
+          type: id,
+          ...(item && typeof item === "object" ? item : {}),
+        });
+      }
+    }
+  }
+  if (out.length === 0 && Array.isArray(config.interfaces)) {
+    return config.interfaces.filter(
+      (entry) => entry && typeof entry === "object",
+    );
+  }
+  return out;
 }
 
 /**
@@ -120,6 +166,7 @@ async function setupInterfaces(
 module.exports = {
   DEFAULT_INTERFACES,
   getDefaultInterfaces,
+  interfacesFromConfig,
   effectiveInterfaces,
   optionsFromEntry,
   setupInterfaces,

@@ -5,6 +5,7 @@ const os = require("node:os");
 
 const { Identity, toHex } = require("@reticulum/core");
 const { listInterfaces, FileStorageAdapter } = require("@reticulum/node");
+const { configKeyFor, EXCLUDED_INTERFACE_IDS } = require("../plugin/schema");
 const makePlugin = require("../plugin/index.js");
 const messaging = require("../plugin/messaging");
 const nomadnet = require("../plugin/nomadnet");
@@ -279,39 +280,23 @@ test("the plugin module exports a constructor that returns a plugin object", () 
   assert.equal(typeof plugin.schema, "function");
 });
 
-test("schema is built from the live RNS interface registry", () => {
+test("schema exposes one instance array per configurable registry type", () => {
   const plugin = makePlugin(makeApp());
   const schema = plugin.schema();
 
-  const branches = schema.properties.interfaces.items.oneOf;
-  const registered = listInterfaces();
-
-  assert.equal(
-    branches.length,
-    registered.length,
-    "one branch per registry entry",
+  const configurable = listInterfaces().filter(
+    (e) => !EXCLUDED_INTERFACE_IDS.includes(e.id),
   );
 
-  const branchIds = branches.map((b) => b.properties.type.const);
-  const registryIds = registered.map((e) => e.id);
-  assert.deepEqual(
-    branchIds.sort(),
-    registryIds.sort(),
-    "every registry id has a matching branch",
-  );
-});
-
-test("every schema branch exposes the type discriminator and keeps the interface's required fields", () => {
-  const plugin = makePlugin(makeApp());
-  const branches = plugin.schema().properties.interfaces.items.oneOf;
-  const byId = Object.fromEntries(listInterfaces().map((e) => [e.id, e]));
-
-  for (const branch of branches) {
-    const entry = byId[branch.properties.type.const];
-    assert.equal(branch.properties.type.type, "string");
-    assert.equal(branch.required[0], "type");
+  // One array per type (minus the browser-only ones), keyed by configKeyFor.
+  for (const entry of configurable) {
+    const key = configKeyFor(entry.id);
+    const array = schema.properties[key];
+    assert.equal(array.type, "array", `${key} is an array`);
+    assert.equal(array.items.title, entry.name);
+    assert.deepEqual(array.items.required, entry.schema.required || []);
     for (const prop of Object.keys(entry.schema.properties || {})) {
-      assert.ok(prop in branch.properties, `preserves ${prop}`);
+      assert.ok(prop in array.items.properties, `${key} preserves ${prop}`);
     }
   }
 });
@@ -320,10 +305,14 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
   const plugin = makePlugin(makeApp());
   const schema = plugin.schema();
 
-  assert.deepEqual(Object.keys(schema.properties), [
-    "log_level",
-    "use_shared_instance",
-    "interfaces",
+  // The non-interface groups stay in place; the per-type interface arrays are
+  // injected between use_shared_instance and identity.
+  const keys = Object.keys(schema.properties);
+  assert.equal(keys[0], "log_level");
+  assert.equal(keys[1], "use_shared_instance");
+  // The first interface array (AutoInterface) follows use_shared_instance.
+  assert.equal(keys[2], configKeyFor("auto"));
+  assert.deepEqual(keys.slice(keys.indexOf("identity")), [
     "identity",
     "messaging",
     "crew",
@@ -334,8 +323,6 @@ test("schema exposes identity and interface groups with the AutoInterface defaul
   assert.ok("publicKey" in identity.properties);
   assert.ok("privateKey" in identity.properties);
   assert.equal(identity.properties.publicKey.readOnly, true);
-
-  assert.deepEqual(schema.properties.interfaces.default, [{ type: "auto" }]);
 });
 
 test("start sets up the node, default AutoInterface and persists a generated identity", async () => {
