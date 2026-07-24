@@ -5,7 +5,7 @@ We should strive to match and surpass the `signalk-meshtastic` plugin which can 
 ## Boundaries
 
 - ✅ **Always**: write at least smoketests for any new functionality
-- ✅ **Always**: update `CHANGELOG.md` for any bigger features or changes
+- ✅ **Always**: update `CHANGELOG.md` for any bigger features or changes. Modifications always happen inside `## [Unreleased]` section
 - ✅ **Always**: fix formatting with `npm run format` after any changes to source files or tests
 - ✅ **Always**: Use `git mv` instead of `mv' for renaming files
 - ⚠️ **Ask first**: adding dependencies
