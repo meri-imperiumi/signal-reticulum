@@ -4,7 +4,7 @@
  * @param {import("@signalk/server-api").ServerAPI} app
  * @returns {import("@signalk/server-api").Plugin}
  */
-const { Reticulum, toHex } = require("@reticulum/core");
+const { Reticulum, toHex, LXMessage, Destination } = require("@reticulum/core");
 const {
   getInterface,
   listInterfaces,
@@ -349,7 +349,7 @@ module.exports = (app) => {
             },
             app.debug,
           );
-          deliver = makeDeliverer(plugin.lxmf, plugin.identity);
+          deliver = makeDeliverer(plugin.lxmf, plugin.identity, app.debug);
           deliverTelemetry = makeTelemetryDeliverer(
             plugin.lxmf,
             plugin.identity,
@@ -386,6 +386,74 @@ module.exports = (app) => {
           unsubscribes.push(() => {
             try {
               plugin.lxmf.removeEventListener("message", onLxmfMessage);
+            } catch {
+              /* best effort */
+            }
+          });
+
+          // Diagnostics on the inbound choke points so the Signal K log shows
+          // exactly where a peer's message stalls — without needing RNS's own
+          // DEBUG console logging. The `lxmf.delivery` destination emits a
+          // `"data"` event for every opportunistic (single-packet) inbound
+          // message right after it decrypts (and sends the packet PROOF). At
+          // that point we parse just the source hash and report whether we can
+          // already recall the sender's identity: if it is UNKNOWN the router
+          // parks the message and solicits a path/announce, and the message is
+          // only dispatched once that announce arrives. This makes flaky
+          // first-contact / path-exchange issues visible instead of silent.
+          const onInboundData = async (event) => {
+            const plaintext = event && event.detail && event.detail.plaintext;
+            if (!plaintext) return;
+            try {
+              const parsed = await LXMessage.deserialize(
+                plaintext,
+                plugin.lxmf.deliveryDest.destinationHash,
+              );
+              const known = await Destination.recall(parsed.sourceHash);
+              app.debug(
+                `Inbound LXMF data packet from ${toHex(
+                  parsed.sourceHash || [],
+                )} (${plaintext.length} bytes); sender identity ${
+                  known
+                    ? "known"
+                    : "UNKNOWN - message parked until announce/path arrives"
+                }`,
+              );
+            } catch (e) {
+              app.debug(
+                `Inbound LXMF data packet (${plaintext.length} bytes) could not be parsed: ${e.message}`,
+              );
+            }
+          };
+          plugin.lxmf.deliveryDest.addEventListener("data", onInboundData);
+          unsubscribes.push(() => {
+            try {
+              plugin.lxmf.deliveryDest.removeEventListener(
+                "data",
+                onInboundData,
+              );
+            } catch {
+              /* best effort */
+            }
+          });
+
+          // A peer announce (or inbound-link LINKIDENTIFY) makes a previously
+          // unknown sender's identity available, which un-parks any message
+          // waiting for it. Logging it lets the operator correlate an inbound
+          // message with the announce that finally released it.
+          const onPeer = (event) => {
+            const destinationHash =
+              event && event.detail && event.detail.destinationHash;
+            if (destinationHash) {
+              app.debug(
+                `Learned LXMF peer ${toHex(destinationHash)} (announce/identity received)`,
+              );
+            }
+          };
+          plugin.lxmf.addEventListener("peer", onPeer);
+          unsubscribes.push(() => {
+            try {
+              plugin.lxmf.removeEventListener("peer", onPeer);
             } catch {
               /* best effort */
             }

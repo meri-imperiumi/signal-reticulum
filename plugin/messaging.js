@@ -21,6 +21,7 @@ const RNS = require("@reticulum/core");
 const deps = {
   LXMRouter: RNS.LXMRouter,
   LXMessage: RNS.LXMessage,
+  Destination: RNS.Destination,
   FIELD_TELEMETRY: RNS.LXMFConstants.FIELD_TELEMETRY,
   fromHex: RNS.fromHex,
   toHex: RNS.toHex,
@@ -75,32 +76,56 @@ async function setupMessaging(rns, identity, options = {}, log = () => {}) {
  * bound to the given router and sender identity. Each call constructs and
  * sends a single LXMF message to the recipient's `lxmf.delivery` destination.
  *
- * When `linkId` is supplied the message is delivered over that already-
- * established Link — the same path the LXMF echobot uses to reply promptly
- * (`LXMRouter.send` looks the link up in `transport.activeLinks`, waits for it
- * to become ACTIVE, sends LINKIDENTIFY once, then the message). Without it the
- * message falls back to opportunistic single-packet delivery (LXMF.md §5.1),
- * which needs the recipient's identity to be known and a fresh path and is
- * therefore flaky for replies. The `linkId` for an inbound message is carried
- * by the router's `"message"` event as `event.detail.link`; command handlers
- * thread it through to the deliverer so replies ride back on the arrival link.
+ * When `linkId` is supplied the message is first tried over that already-
+ * established Link (the prompt path the LXMF echobot uses). If that link send
+ * fails — most importantly when a battery-conscious mobile client tears the
+ * link down right after its own message is acknowledged, so the link is gone
+ * by the time we reply — the reply falls back to opportunistic single-packet
+ * delivery (LXMF.md §5.1). That is the same path telemetry and alerts already
+ * use to reach these clients reliably, so a reply never goes missing just
+ * because the arrival link did not stay open. Without a `linkId` (e.g.
+ * notification forwarding, or an opportunistic inbound message) the reply is
+ * sent opportunistically directly.
  *
  * Rejects if the recipient's identity is unknown or delivery fails; the caller
  * (notification forwarding) logs and continues with the next recipient.
  *
  * @param {object} lxmf - An initialised LXMRouter.
  * @param {object} identity - The sender Reticulum identity.
+ * @param {(...args:any[])=>void} [debug] - Signal K `app.debug`-style logger
+ *   used to record each delivery outcome (link, opportunistic, or fallback).
  * @returns {(destinationHashHex:string, title:string, content:string, linkId?:Uint8Array|null)=>Promise<void>}
  */
-function makeDeliverer(lxmf, identity) {
+function makeDeliverer(lxmf, identity, debug = () => {}) {
   return async function deliver(destinationHashHex, title, content, linkId) {
-    const message = new deps.LXMessage({
-      sourceHash: lxmf.deliveryDest.destinationHash,
-      destinationHash: deps.fromHex(destinationHashHex),
-      title,
-      content,
-    });
-    await lxmf.send(message, identity, linkId);
+    const build = () =>
+      new deps.LXMessage({
+        sourceHash: lxmf.deliveryDest.destinationHash,
+        destinationHash: deps.fromHex(destinationHashHex),
+        title,
+        content,
+      });
+    try {
+      await lxmf.send(build(), identity, linkId);
+      debug(
+        `LXMF message delivered to ${destinationHashHex}${
+          linkId ? " via the arrival link" : " (opportunistic)"
+        }`,
+      );
+    } catch (e) {
+      // No arrival link to fall back from — propagate the error.
+      if (!linkId) throw e;
+      // The link reply failed (typically the peer closed the link after its
+      // message was acknowledged). Retry as an opportunistic single packet —
+      // the delivery path telemetry/alerts already use to reach these peers.
+      debug(
+        `LXMF link reply to ${destinationHashHex} failed (${e.message}); retrying opportunistic`,
+      );
+      await lxmf.send(build(), identity, null);
+      debug(
+        `LXMF message delivered to ${destinationHashHex} (opportunistic fallback)`,
+      );
+    }
   };
 }
 
@@ -135,9 +160,85 @@ function makeTelemetryDeliverer(lxmf, identity) {
   };
 }
 
+/**
+ * Attaches Signal K logging to the inbound LXMF choke points so an operator
+ * can follow a peer's message through the router — packet decrypted → sender
+ * identity known or unknown → dispatched — without having to enable RNS's
+ * own DEBUG console output, which bypasses `app.debug`.
+ *
+ * The `lxmf.delivery` destination emits a `"data"` event for every
+ * opportunistic (single-packet) inbound message the instant it decrypts
+ * (which is also when it sends the packet PROOF). At that point we parse just
+ * the source hash and report whether we can already recall the sender's
+ * identity: when it is UNKNOWN the router parks the message and solicits a
+ * path/announce, and the message is only dispatched once that announce
+ * arrives — the most common reason a peer sees a proof but the plugin never
+ * logs `Received LXMF message`. A `"peer"` event is emitted whenever a peer
+ * announce (or inbound-link LINKIDENTIFY) makes an identity available, so a
+ * parked message can be correlated with the announce that released it.
+ *
+ * @param {object} lxmf - An initialised LXMRouter.
+ * @param {(...args:any[])=>void} [debug] - Signal K `app.debug`-style logger.
+ * @returns {() => void} unsubscribe — removes both listeners.
+ */
+function attachInboundDiagnostics(lxmf, debug = () => {}) {
+  const onData = async (event) => {
+    const plaintext = event && event.detail && event.detail.plaintext;
+    if (!plaintext) return;
+    try {
+      const parsed = await deps.LXMessage.deserialize(
+        plaintext,
+        lxmf.deliveryDest.destinationHash,
+      );
+      const known = await deps.Destination.recall(parsed.sourceHash);
+      debug(
+        `Inbound LXMF data packet from ${deps.toHex(
+          parsed.sourceHash || [],
+        )} (${plaintext.length} bytes); sender identity ${
+          known
+            ? "known"
+            : "UNKNOWN - message parked until announce/path arrives"
+        }`,
+      );
+    } catch (e) {
+      debug(
+        `Inbound LXMF data packet (${plaintext.length} bytes) could not be parsed: ${e.message}`,
+      );
+    }
+  };
+  lxmf.deliveryDest.addEventListener("data", onData);
+
+  const onPeer = (event) => {
+    const destinationHash =
+      event && event.detail && event.detail.destinationHash;
+    if (destinationHash) {
+      debug(
+        `Learned LXMF peer ${deps.toHex(
+          destinationHash,
+        )} (announce/identity received)`,
+      );
+    }
+  };
+  lxmf.addEventListener("peer", onPeer);
+
+  return () => {
+    try {
+      lxmf.deliveryDest.removeEventListener("data", onData);
+    } catch {
+      /* best effort */
+    }
+    try {
+      lxmf.removeEventListener("peer", onPeer);
+    } catch {
+      /* best effort */
+    }
+  };
+}
+
 module.exports = {
   deps,
   setupMessaging,
   makeDeliverer,
   makeTelemetryDeliverer,
+  attachInboundDiagnostics,
 };

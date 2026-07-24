@@ -1,0 +1,8 @@
+.github
+.editorconfig
+node_modules
+.DS_Store
+signalk-meshtastic/
+Sideband/
+PROTOCOL-SPEC.md
+AGENTS.md

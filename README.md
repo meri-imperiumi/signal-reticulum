@@ -39,6 +39,7 @@ Each crew member is identified by the `lxmf.delivery` destination hash of their 
 ### Messaging
 
 - **Send Signal K alerts to the crew via LXMF** — when enabled (default), `alarm`/`emergency` notifications are forwarded to the crew.
+- **Allow crew to toggle digital switches by LXMF message** — when enabled (off by default), a crew member can text `turn <switch> on` / `turn <switch> off` to set `electrical.switches.<switch>.state`.
 - **LXMF display name** — the name announced to the mesh for this node's `lxmf.delivery` destination, shown on crew members' messaging devices.
 
 ## How alerting works
@@ -58,6 +59,7 @@ Available commands:
 | Command | Crew only | Description |
 | --- | --- | --- |
 | `ping` | no | Replies `pong`, so any peer can check the node is reachable. |
+| `turn <switch> on` / `turn <switch> off` | yes | Toggles a Signal K digital switch (`electrical.switches.<switch>.state`) and replies to confirm. Requires the **Allow crew to toggle digital switches** setting to be enabled. |
 
 Replies are sent back to the sender's `lxmf.delivery` destination (the message source hash).
 

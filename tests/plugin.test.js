@@ -119,9 +119,9 @@ class FakeLxmRouter extends EventTarget {
     this.initCalls = 0;
     this.announceCalls = [];
     this.sent = [];
-    this.deliveryDest = {
+    this.deliveryDest = Object.assign(new EventTarget(), {
       destinationHash: new Uint8Array(16).fill(9),
-    };
+    });
     FakeLxmRouter.instances.push(this);
   }
   async init() {

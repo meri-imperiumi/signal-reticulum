@@ -21,6 +21,7 @@ const { effectiveCrew } = require("../notifications");
 /** Registered commands, keyed by name. Add new commands here. */
 const commands = {
   ping: require("./ping"),
+  switching: require("./switching"),
 };
 
 /**

@@ -167,6 +167,15 @@ function buildPluginSchema(interfaces) {
             title: "Send Signal K alerts to the crew via LXMF",
             default: true,
           },
+          digital_switching: {
+            type: "boolean",
+            title: "Allow crew to toggle digital switches by LXMF message",
+            description:
+              'When enabled, a crew member can text "turn <switch> on" or ' +
+              '"turn <switch> off" to set the ' +
+              "electrical.switches.<switch>.state path. Off by default.",
+            default: false,
+          },
           display_name: {
             type: "string",
             title: "LXMF display name",
