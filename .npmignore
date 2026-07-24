@@ -6,3 +6,4 @@ signalk-meshtastic/
 Sideband/
 PROTOCOL-SPEC.md
 AGENTS.md
+*.tgz
