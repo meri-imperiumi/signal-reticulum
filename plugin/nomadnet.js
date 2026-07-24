@@ -295,6 +295,46 @@ function renderPage(context = {}) {
 }
 
 /**
+ * Formats a NomadNet page-request log line in the same column shape as Signal
+ * K's HTTP request log (`METHOD PATH STATUS TIME ms LEN REQUESTER`), prefixed
+ * with `NomadNet` so mesh-served pages are never confused with the server's
+ * own HTTP traffic in the log.
+ *
+ * The HTTP-style fields are synthesised because NomadNet's §11
+ * REQUEST/RESPONSE carries none of them: `status` is 200 for a served page and
+ * 500 for a render failure; `method` is GET for a plain fetch and POST for a
+ * NomadNet form submission (see {@link setupNomadNet}); `requester` is the
+ * browsing peer's hex identity hash (or `-` when anonymous).
+ *
+ * @param {object} fields
+ * @param {string} fields.method
+ * @param {string} fields.path
+ * @param {number} fields.status
+ * @param {string|number} fields.ms - Elapsed milliseconds.
+ * @param {number} fields.bytes - Response body length in bytes.
+ * @param {string|null} [fields.requester] - Hex identity hash of the requester.
+ * @returns {string}
+ */
+function formatRequestLog({ method, path, status, ms, bytes, requester }) {
+  const who = requester || "-";
+  return `NomadNet ${method} ${path} ${status} ${ms} ms ${bytes} ${who}`;
+}
+
+/**
+ * Reduces a remote Reticulum identity to a greppable label for request logging
+ * — its hex identity hash — or `null` when no identity is known (an anonymous
+ * or not-yet-identified peer).
+ *
+ * @param {any} identity
+ * @returns {string|null}
+ */
+function identityLabel(identity) {
+  if (!identity) return null;
+  const hash = identity.identityHash || identity.hash;
+  return hash ? deps.toHex(hash) : null;
+}
+
+/**
  * Creates and announces the NomadNet node destination, registers the index page
  * handler, and returns an object exposing the destination hash and a `stop()`
  * teardown.
@@ -336,7 +376,42 @@ async function setupNomadNet(rns, identity, options = {}, log = () => {}) {
   rns.registerDestination(dest);
 
   await dest.registerRequestHandler(INDEX_PATH, {
-    responseGenerator: async () => encodeUtf8(renderPage(getContext())),
+    responseGenerator: async (
+      path,
+      data,
+      _requestId,
+      remoteIdentity,
+      _requestTime,
+    ) => {
+      const start = Date.now();
+      // NomadNet's §11 REQUEST/RESPONSE has no HTTP method or status code.
+      // Mirror the protocol's own data convention to derive them for the log:
+      // a null `data` is a plain page fetch (GET), a present `data` is a
+      // NomadNet form submission (POST); a served page is 200, a render
+      // failure 500.
+      const method = data == null ? "GET" : "POST";
+      let status = 200;
+      let body;
+      try {
+        body = encodeUtf8(renderPage(getContext()));
+      } catch (e) {
+        status = 500;
+        body = encodeUtf8(`>>Error\n\n${e.message}\n`);
+        log(`NomadNet page render failed for ${path}: ${e.message}`);
+      }
+      const ms = (Date.now() - start).toFixed(3);
+      log(
+        formatRequestLog({
+          method,
+          path,
+          status,
+          ms,
+          bytes: body.length,
+          requester: identityLabel(remoteIdentity),
+        }),
+      );
+      return body;
+    },
     allow: deps.Allow.ALL,
   });
 
@@ -442,6 +517,7 @@ module.exports = {
   TELEMETRY_SECTION,
   setupNomadNet,
   renderPage,
+  formatRequestLog,
   readString,
   readNumber,
   readPosition,

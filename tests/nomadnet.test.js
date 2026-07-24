@@ -5,6 +5,7 @@ const {
   deps,
   setupNomadNet,
   renderPage,
+  formatRequestLog,
   readNumber,
   formatVesselState,
   formatPosition,
@@ -388,6 +389,88 @@ test("the index handler returns the live page bytes built from getContext", asyn
     ">>Renamed\n",
     "getContext is re-evaluated on each request",
   );
+
+  FakeDestination.instances.length = 0;
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("formatRequestLog renders a Signal-K-HTTP-shaped line prefixed NomadNet", () => {
+  assert.equal(
+    formatRequestLog({
+      method: "GET",
+      path: "/page/index.mu",
+      status: 200,
+      ms: "0.419",
+      bytes: 1234,
+      requester: "abcdef0123",
+    }),
+    "NomadNet GET /page/index.mu 200 0.419 ms 1234 abcdef0123",
+  );
+});
+
+test("formatRequestLog shows '-' for an anonymous requester", () => {
+  assert.equal(
+    formatRequestLog({
+      method: "GET",
+      path: "/page/index.mu",
+      status: 200,
+      ms: "0.001",
+      bytes: 10,
+      requester: null,
+    }),
+    "NomadNet GET /page/index.mu 200 0.001 ms 10 -",
+  );
+});
+
+test("the index handler logs each request as a NomadNet line and returns the page", async () => {
+  deps.Destination = FakeDestination;
+  deps.toHex = (bytes) => Buffer.from(bytes).toString("hex");
+  const rns = makeRns();
+  const logs = [];
+
+  const site = await setupNomadNet(
+    rns,
+    {},
+    { displayName: "Boat", getContext: () => ({ vesselName: "S/Y Bergie" }) },
+    (...a) => logs.push(a.join(" ")),
+  );
+
+  const generator = site.destination.registered[0].options.responseGenerator;
+  const requester = { identityHash: new Uint8Array([1, 2, 3, 4]) };
+
+  // A plain page fetch (data == null) logs as GET.
+  const body = await generator(
+    "/page/index.mu",
+    null,
+    new Uint8Array(16),
+    requester,
+    Date.now() / 1000,
+  );
+
+  assert.equal(
+    Buffer.from(body).toString("utf8"),
+    ">>S/Y Bergie\n",
+    "page bytes still returned",
+  );
+  const getLine = logs.find((l) => l.startsWith("NomadNet GET "));
+  assert.ok(getLine, "GET request logged");
+  assert.match(
+    getLine,
+    /^NomadNet GET \/page\/index\.mu 200 [\d.]+ ms \d+ 01020304$/,
+  );
+
+  // A NomadNet form submission (data present) logs as POST.
+  logs.length = 0;
+  await generator(
+    "/page/index.mu",
+    { field: "value" },
+    new Uint8Array(16),
+    null,
+    Date.now() / 1000,
+  );
+  const postLine = logs.find((l) => l.startsWith("NomadNet POST "));
+  assert.ok(postLine, "POST request logged");
+  assert.match(postLine, / -$/, "anonymous requester shown as '-'");
 
   FakeDestination.instances.length = 0;
   Object.assign(deps, REAL_DEPS);
