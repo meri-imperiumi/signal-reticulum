@@ -29,8 +29,8 @@
     "appIcon": "./doc/signalk-reticulum.png",
     "displayName": "Reticulum Network",
     "screenshots": [
-      "./doc/alerts.jpg",
-      "./doc/telemetry-position.jpg",
+      "./doc/alerts.png",
+      "./doc/telemetry-position.png",
       "./doc/nomadnet.png"
     ]
   },
