@@ -200,6 +200,83 @@ test("makeDeliverer forwards the arrival link id so replies ride back over the e
   Object.assign(deps, REAL_DEPS);
 });
 
+test("makeDeliverer falls back to opportunistic delivery when the link reply fails", async () => {
+  const router = new FakeLxmRouter({}, {});
+  const identity = { id: "me" };
+  deps.LXMessage = FakeLXMessage;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  // Simulate a mobile client that tore the link down after its message was
+  // acknowledged: the link send throws, so the reply must retry opportunistically.
+  let firstAttempt = true;
+  router.send = async (message, sentIdentity, linkId) => {
+    if (firstAttempt && linkId) {
+      firstAttempt = false;
+      throw new Error("Link 7ef48b3f is not available");
+    }
+    router.sent.push({ message, identity: sentIdentity, linkId });
+  };
+
+  const deliver = makeDeliverer(router, identity);
+  const linkId = new Uint8Array(8).fill(2);
+  await deliver("0123456789abcdef0123456789abcdef", "", "Pong", linkId);
+
+  assert.equal(
+    router.sent.length,
+    1,
+    "the failed link send is not counted; one opportunistic retry went out",
+  );
+  assert.ok(!router.sent[0].linkId, "retry is opportunistic (no link id)");
+
+  Object.assign(deps, REAL_DEPS);
+});
+
+test("makeDeliverer records delivery outcomes through the debug logger", async () => {
+  const router = new FakeLxmRouter({}, {});
+  const identity = { id: "me" };
+  deps.LXMessage = FakeLXMessage;
+  deps.fromHex = (hex) => Buffer.from(hex, "hex");
+
+  const logs = [];
+  const debug = (msg) => logs.push(msg);
+  const deliver = makeDeliverer(router, identity, debug);
+  const dest = "0123456789abcdef0123456789abcdef";
+
+  // Success over a link.
+  await deliver(dest, "", "Pong", new Uint8Array(8).fill(2));
+  // Success opportunistic (no link).
+  await deliver(dest, "", "Hi");
+  // Link fails -> opportunistic fallback succeeds.
+  let firstAttempt = true;
+  router.send = async (message, sentIdentity, linkId) => {
+    if (firstAttempt && linkId) {
+      firstAttempt = false;
+      throw new Error("Link is not available");
+    }
+    router.sent.push({ message, identity: sentIdentity, linkId });
+  };
+  await deliver(dest, "", "Pong", new Uint8Array(8).fill(3));
+
+  assert.ok(
+    logs.some((l) => /via the arrival link/.test(l)),
+    "link delivery logged",
+  );
+  assert.ok(
+    logs.some((l) => /\(opportunistic\)/.test(l)),
+    "opportunistic delivery logged",
+  );
+  assert.ok(
+    logs.some((l) => /link reply.*failed.*retrying opportunistic/.test(l)),
+    "link failure before fallback logged",
+  );
+  assert.ok(
+    logs.some((l) => /opportunistic fallback/.test(l)),
+    "opportunistic fallback success logged",
+  );
+
+  Object.assign(deps, REAL_DEPS);
+});
+
 test("makeDeliverer propagates delivery errors", async () => {
   const router = new FakeLxmRouter({}, {});
   router.send = async () => {
