@@ -1,5 +1,5 @@
 # Changelog
-## [Unreleased]
+## [0.1.0] - 2026-07-23
 ### Added
 - Digital switching command: crew members can toggle a Signal K digital switch by texting `turn <switch> on` or `turn <switch> off` over LXMF, which writes the `electrical.switches.<switch>.state` path via `app.putSelfPath`. The command is crew-only and additionally gated by the new `messaging.digital_switching` setting (off by default), so the operator must opt in. A failed put is reported back to the crew instead of being silently dropped, improving on the `signalk-meshtastic` behaviour
 - Periodic telemetry broadcast to the crew: when the new `telemetry` config group is enabled, the node builds a Sideband-compatible telemetry snapshot from Signal K and sends it to every configured crew member over LXMF (carried in the `FIELD_TELEMETRY` field) shortly after start and then on a configurable interval (default 300 s, clamped to a 30 s minimum). The snapshot is wire-compatible with Sideband's `Telemeter.packed()` format so Sideband, NomadNet and MeshChat render it in the peer telemetry view
