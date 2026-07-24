@@ -1,5 +1,5 @@
 # Changelog
-## Unreleased
+## [0.2.0] - 2026-07-23
 ### Added
 - NomadNet page requests are now logged in the Signal K server log in the same column shape as the server's own HTTP request log (`METHOD PATH STATUS TIME ms LEN REQUESTER`), prefixed `NomadNet` so mesh-served pages are never confused with HTTP traffic — e.g. `NomadNet GET /page/index.mu 200 0.419 ms 1234 a1b2c3d4e5f6`. The HTTP-style fields are synthesised because NomadNet's REQUEST/RESPONSE protocol carries none of them: the method is GET for a plain page fetch and POST for a NomadNet form submission, the status is 200 for a served page (500 on a render failure), the length is the response body size in bytes, and the requester is the browsing peer's hex identity hash (`-` when anonymous)
 
