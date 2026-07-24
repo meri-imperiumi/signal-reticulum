@@ -4,3 +4,4 @@ package-lock.json
 signalk-meshtastic/
 PROTOCOL-SPEC.md
 Sideband/
+*.tgz

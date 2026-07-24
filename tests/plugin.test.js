@@ -184,7 +184,10 @@ class FakeNomadDestination extends EventTarget {
       packet,
       listeners: {},
       addEventListener(type, fn) {
-        (link.listeners[type] ||= []).push(fn);
+        if (!link.listeners[type]) {
+          link.listeners[type] = [];
+        }
+        link.listeners[type].push(fn);
       },
     };
     this.acceptedLinks.push(link);
